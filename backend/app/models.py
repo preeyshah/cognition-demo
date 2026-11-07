@@ -158,6 +158,9 @@ class AuditLog(Base):
     detail: Mapped[dict] = mapped_column(JsonType, default=dict)
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True, default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    # SHA-256 hash chain (see audit.chain_hash): editing or deleting any row breaks every later link.
+    prev_hash: Mapped[str | None] = mapped_column(String(64))
+    row_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class PolicySetting(Base):
@@ -197,7 +200,7 @@ class SupportRequest(Base):
     __tablename__ = "support_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "error" | "guardrail"
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "error" | "guardrail" | "compliance"
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
@@ -209,6 +212,40 @@ class SupportRequest(Base):
     remediation_error: Mapped[str | None] = mapped_column(Text)
     created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class AccessReview(Base):
+    """A completed user-access recertification (SOC 2 CC6.2/CC6.3, PCI DSS 7.2.4, SOX ITGC)."""
+
+    __tablename__ = "access_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewer_email: Mapped[str] = mapped_column(String(255))
+    decisions: Mapped[list] = mapped_column(JsonType, default=list)
+    revoked_count: Mapped[int] = mapped_column(Integer, default=0)
+    trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class DataSubjectRequest(Base):
+    """GDPR data-subject request (Art. 15 access / Art. 17 erasure), due within dsar_due_days."""
+
+    __tablename__ = "data_subject_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # "export" | "erasure"
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # "open" | "completed"
+    note: Mapped[str] = mapped_column(Text, default="")
+    requested_by_email: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    result: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+    customer: Mapped[Customer] = relationship(lazy="joined")
 
 
 class UsedSsoCode(Base):

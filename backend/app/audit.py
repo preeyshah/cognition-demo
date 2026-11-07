@@ -1,12 +1,83 @@
+import hashlib
+import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
-from .models import AuditLog, SupportRequest, User
+from .models import AuditLog, SupportRequest, User, utcnow
+from .tracing import current_trace_id
+
+# Serialises chain appends across API processes/tasks (Postgres transaction-scoped advisory lock).
+_CHAIN_LOCK_KEY = 0x41554449
+
+
+def _utc_iso(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def chain_hash(entry: AuditLog, prev_hash: str | None) -> str:
+    """SHA-256 over the previous link and a canonical encoding of every audited field."""
+    payload = json.dumps(
+        {
+            "prev": prev_hash, "actor_id": entry.actor_id, "actor_email": entry.actor_email,
+            "action": entry.action, "entity_type": entry.entity_type, "entity_id": entry.entity_id,
+            "success": bool(entry.success), "ip_address": entry.ip_address, "detail": entry.detail or {},
+            "trace_id": entry.trace_id, "created_at": _utc_iso(entry.created_at),
+        },
+        sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+@event.listens_for(Session, "before_flush")
+def _link_audit_entries(session: Session, _ctx, _instances) -> None:
+    new = [o for o in session.new if isinstance(o, AuditLog)]
+    if not new:
+        return
+    new.sort(key=lambda o: o._sa_instance_state.insert_order)
+    with session.no_autoflush:
+        if session.get_bind().dialect.name == "postgresql":
+            session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _CHAIN_LOCK_KEY})
+        prev = session.scalar(
+            select(AuditLog.row_hash).where(AuditLog.row_hash.is_not(None)).order_by(AuditLog.id.desc()).limit(1)
+        )
+    for entry in new:
+        # Column defaults are applied at INSERT time, after this hook; resolve them now so the hash covers them.
+        entry.created_at = entry.created_at or utcnow()
+        entry.trace_id = entry.trace_id or current_trace_id()
+        entry.success = True if entry.success is None else entry.success
+        entry.detail = json.loads(json.dumps(entry.detail or {}, default=str))
+        entry.prev_hash = prev
+        entry.row_hash = prev = chain_hash(entry, prev)
+
+
+def verify_chain(db: Session) -> dict:
+    """Recompute every link. Rows written before the chain existed are counted, not verified."""
+    checked = legacy = 0
+    prev: str | None = None
+    broken: dict | None = None
+    for a in db.scalars(select(AuditLog).order_by(AuditLog.id).execution_options(yield_per=1000)):
+        if a.row_hash is None and checked == 0:
+            legacy += 1
+            continue
+        if a.row_hash is None:
+            broken = {"id": a.id, "reason": "entry is missing its hash"}
+        elif a.prev_hash != prev:
+            broken = {"id": a.id, "reason": "link to the previous entry is broken (an entry was deleted or reordered)"}
+        elif chain_hash(a, prev) != a.row_hash:
+            broken = {"id": a.id, "reason": "entry contents do not match its hash (modified after it was written)"}
+        if broken:
+            break
+        checked += 1
+        prev = a.row_hash
+    return {"ok": broken is None, "verified_entries": checked, "legacy_unhashed_entries": legacy,
+            "head_hash": prev, "first_broken": broken}
 
 
 def client_ip(request: Request | None) -> str | None:

@@ -33,6 +33,11 @@ with TestClient(app) as client:  # lifespan runs init_db (create_all, analytics 
     assert res.status_code == 200, res.text
     trace = client.get(f"/admin/traces/{res.headers['X-Trace-Id']}", headers={"Authorization": f"Bearer {token}"})
     assert trace.status_code == 200 and trace.json()["request"]["actor_email"] == "priya.admin@acmepay.com", trace.text
+    # Compliance Center: audit hash chain verifies on Postgres (JSONB round-trip) and the append-only trigger exists.
+    res = client.get("/compliance/controls", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200, res.text
+    au02 = next(c for c in res.json()["controls"] if c["id"] == "AU-02")
+    assert au02["status"] == "pass" and au02["evidence"]["append_only_trigger"], au02
 
 # Queue: a ticket locked by another worker is skipped (SKIP LOCKED); the free one is processed.
 with SessionLocal() as db:

@@ -12,7 +12,7 @@ from .db import Base, SessionLocal, engine
 from .models import RequestTrace
 from .payouts import PayoutWorker
 from .remediation import record_error, start_worker
-from .routers import admin, auth, dashboard, monitoring, payouts, refunds
+from .routers import admin, auth, compliance, dashboard, monitoring, payouts, refunds
 from .seed import seed
 from .tracing import TRACE_HEADER, TracingMiddleware, configure_logging
 
@@ -76,7 +76,7 @@ app.add_middleware(
 )
 app.add_middleware(TracingMiddleware, record=record_trace, on_error=record_error)
 for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router, payouts.router,
-          payouts.webhooks):
+          payouts.webhooks, compliance.router):
     app.include_router(r)
 if get_settings().mock_sso_enabled:
     app.include_router(auth.sso_router)

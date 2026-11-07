@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     guardrail_alert_threshold: int = 50
     guardrail_alert_window_minutes: int = 10
 
+    # Compliance Center thresholds (see app/compliance.py for the framework mapping).
+    audit_retention_days: int = 400  # PCI DSS 10.5.1: >= 12 months
+    access_review_interval_days: int = 90  # quarterly; PCI DSS 7.2.4 requires at least every 6 months
+    dormant_account_days: int = 90  # PCI DSS 8.2.6
+    dsar_due_days: int = 30  # GDPR Art. 12(3): one month
+    session_idle_limit_minutes: int = 15  # PCI DSS 8.2.8
+
     seed_on_startup: bool = True
 
     @model_validator(mode="before")
