@@ -35,6 +35,12 @@ variable "devin_org_id" {
   default     = ""
 }
 
+variable "devin_max_acu" {
+  description = "ACU cap per auto-remediation Devin session."
+  type        = number
+  default     = 10
+}
+
 variable "github_repo" {
   type    = string
   default = "preeyshah/cognition-demo"

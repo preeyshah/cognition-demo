@@ -130,6 +130,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
       { name = "DEVIN_ORG_ID", value = var.devin_org_id },
       { name = "DEVIN_REPO", value = var.github_repo },
+      { name = "DEVIN_MAX_ACU", value = tostring(var.devin_max_acu) },
     ]
     secrets = [
       { name = "DB_USER", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },
