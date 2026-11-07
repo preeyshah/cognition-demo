@@ -5,7 +5,7 @@ import type { User } from './api'
 import { useAuth } from './auth'
 import { RoleBadge, Spinner } from './components/ui'
 import { money } from './format'
-import { AllRefunds, AuditLog, Escalations, Policies, Team, ViewAs } from './pages/Admin'
+import { AllRefunds, AuditLog, Escalations, Policies, SupportTickets, Team, ViewAs } from './pages/Admin'
 import { Analytics } from './pages/Analytics'
 import { Payouts } from './pages/Payouts'
 import { Login } from './pages/Login'
@@ -33,6 +33,7 @@ function pagesFor(user: User): Page[] {
       { path: '/team', label: 'Team & limits', element: <Team me={user} /> },
       { path: '/policies', label: 'Policies', element: <Policies /> },
       { path: '/audit', label: 'Audit log', element: <AuditLog /> },
+      { path: '/support', label: 'Support tickets', element: <SupportTickets /> },
       { path: '/view-as', label: 'View as', element: <ViewAs me={user} /> },
     ]
   }

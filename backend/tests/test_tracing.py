@@ -140,3 +140,13 @@ def test_guardrail_alert_is_queued_for_the_worker(client, db, monkeypatch):
     assert remediation.process_queue() == 1
     db.expire_all()
     assert db.get(SupportRequest, sr.id).status == "devin_working"
+
+
+def test_support_config_is_admin_only_and_has_no_secrets(client, db):
+    admin = user(db, "priya.admin@acmepay.com")
+    res = client.get("/admin/support/config", headers=auth(admin))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["devin_enabled"] is False and body["base_branch"] == "dev"
+    assert not any("key" in k for k in body)
+    assert client.get("/admin/support/config", headers=auth(user(db, JORDAN))).status_code == 403

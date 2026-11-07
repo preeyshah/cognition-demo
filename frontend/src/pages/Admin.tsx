@@ -312,3 +312,78 @@ export function ViewAs({ me }: { me: User }) {
     </>
   )
 }
+
+interface SupportTicket { id: number; kind: 'support' | 'error'; title: string; description: string; trace_id: string | null; reporter_email: string | null; status: string; devin_session_url: string | null; remediation_error: string | null; created_at: string }
+interface SupportConfig { devin_enabled: boolean; auto_remediate_errors: boolean; repo: string; base_branch: string; max_acu: number }
+const TICKET_TONE: Record<string, string> = { open: 'muted', queued: 'warning', devin_working: 'pending', remediation_failed: 'danger' }
+
+export function SupportTickets() {
+  const [rows, setRows] = useState<SupportTicket[] | null>(null)
+  const [config, setConfig] = useState<SupportConfig | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const load = useCallback(() => {
+    api<SupportTicket[]>('/admin/support/requests').then(setRows).catch((e) => setError(e.message))
+  }, [])
+  useEffect(() => {
+    api<SupportConfig>('/admin/support/config').then(setConfig).catch((e) => setError(e.message))
+    load()
+    const t = setInterval(load, 5000)  // tickets change in the background as Devin picks them up
+    return () => clearInterval(t)
+  }, [load])
+  const remediate = async (id: number) => {
+    setError(null)
+    try {
+      await api(`/admin/support/requests/${id}/remediate`, 'POST')
+      load()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  return (
+    <>
+      <PageHead title="Support tickets" subtitle="Support requests and server errors captured by monitoring. Each one can be handed to Devin, which investigates the trace and opens a fix PR.">
+        <button className="btn sm" onClick={load}>Refresh</button>
+      </PageHead>
+      {config ? (
+        <div className="notice">
+          {config.devin_enabled
+            ? <>Devin is connected: {config.auto_remediate_errors ? 'server errors are sent automatically' : 'tickets are sent manually'}; PRs target <b>{config.repo}</b> @ <b>{config.base_branch}</b> (max {config.max_acu} ACU per session).</>
+            : <>Devin is not configured (set <code>DEVIN_API_KEY</code>). Tickets are recorded but not sent.</>}
+        </div>
+      ) : null}
+      <ErrorBox message={error} />
+      <div className="table-wrap" style={{ marginTop: 12 }}>
+        {!rows ? <Spinner /> : (
+          <table>
+            <thead><tr><th>#</th><th>When</th><th>Kind</th><th>Ticket</th><th>Trace</th><th>Status</th><th>Devin</th><th></th></tr></thead>
+            <tbody>
+              {rows.length === 0 ? <tr><td colSpan={8} className="empty">No tickets</td></tr> : null}
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="sub">{r.id}</td>
+                  <td className="sub">{dateTime(r.created_at)}</td>
+                  <td><Badge kind={r.kind === 'error' ? 'danger' : 'muted'}>{r.kind}</Badge></td>
+                  <td style={{ maxWidth: 420 }}>
+                    <b>{r.title}</b>
+                    <div className="sub" style={{ whiteSpace: 'pre-line' }}>{r.reporter_email}{r.description ? ` · ${r.description}` : ''}</div>
+                    {r.remediation_error ? <div className="tone-danger" style={{ fontSize: 12 }}>{r.remediation_error}</div> : null}
+                  </td>
+                  <td className="sub"><code>{r.trace_id ?? '—'}</code></td>
+                  <td><Badge kind={TICKET_TONE[r.status] ?? 'muted'}>{humanize(r.status)}</Badge></td>
+                  <td>{r.devin_session_url ? <a href={r.devin_session_url} target="_blank" rel="noreferrer">Open session</a> : <span className="sub">—</span>}</td>
+                  <td className="num">
+                    {['open', 'remediation_failed'].includes(r.status) ? (
+                      <button className="btn sm primary" disabled={!config?.devin_enabled} title={config?.devin_enabled ? '' : 'Devin is not configured'} onClick={() => remediate(r.id)}>
+                        {r.status === 'remediation_failed' ? 'Retry' : 'Send to Devin'}
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  )
+}
