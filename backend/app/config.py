@@ -5,6 +5,8 @@ from urllib.parse import quote
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEMO_WEBHOOK_SECRET = "whsec_demo_only"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -49,7 +51,7 @@ class Settings(BaseSettings):
     # Payments provider (PayCore) used to actually move the money once a refund is approved.
     payments_provider_url: str = "http://localhost:9000"
     payments_provider_api_key: str = "demo-provider-key"
-    payments_webhook_secret: str = "whsec_demo_only"  # shared with the provider; set from a secret store
+    payments_webhook_secret: str = DEMO_WEBHOOK_SECRET  # shared with the provider; set from a secret store
     payments_webhook_tolerance_s: int = 300  # reject stale/replayed webhook signatures
     payments_timeout_s: float = 5.0
     payments_sandbox_controls: bool = True  # admin UI can inject provider failures (sandbox only)
@@ -86,6 +88,8 @@ class Settings(BaseSettings):
         if self.environment == "prod" and "seed_on_startup" not in self.model_fields_set:
             self.seed_on_startup = False
         # Provider failure injection is a sandbox demo tool; never expose it in prod by default.
+        if self.environment == "prod" and self.payments_webhook_secret == DEMO_WEBHOOK_SECRET:
+            raise ValueError("PAYMENTS_WEBHOOK_SECRET must be set when ENVIRONMENT=prod")
         if self.environment == "prod" and "payments_sandbox_controls" not in self.model_fields_set:
             self.payments_sandbox_controls = False
         return self
