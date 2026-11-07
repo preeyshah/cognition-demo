@@ -4,8 +4,10 @@ import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import type { User } from './api'
 import { useAuth } from './auth'
 import { RoleBadge, Spinner } from './components/ui'
+import { RequestFeature } from './components/RequestFeature'
 import { money } from './format'
 import { AllRefunds, AuditLog, Escalations, Policies, Team, ViewAs } from './pages/Admin'
+import { SupportTickets } from './pages/Support'
 import { Analytics } from './pages/Analytics'
 import { Login } from './pages/Login'
 import { ReviewerHistory, ReviewerQueue } from './pages/ReviewerQueue'
@@ -31,6 +33,7 @@ function pagesFor(user: User): Page[] {
       { path: '/team', label: 'Team & limits', element: <Team me={user} /> },
       { path: '/policies', label: 'Policies', element: <Policies /> },
       { path: '/audit', label: 'Audit log', element: <AuditLog /> },
+      { path: '/support', label: 'Support tickets', element: <SupportTickets /> },
       { path: '/view-as', label: 'View as', element: <ViewAs me={user} /> },
     ]
   }
@@ -63,6 +66,7 @@ export default function App() {
                 </div>
               </div>
               <RoleBadge role={user.role} />
+              <RequestFeature />
               <button className="btn sm ghost-dark" onClick={logout}>Sign out</button>
             </div>
           </div>

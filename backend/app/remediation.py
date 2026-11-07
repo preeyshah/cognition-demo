@@ -49,10 +49,12 @@ def trace_bundle(db: Session, trace_id: str) -> dict:
 
 def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
     s = get_settings()
+    kind_label = {"error": "production error", "feature": "feature request", "guardrail": "guardrail alert"}.get(
+        sr.kind, "support request"
+    )
     lines = [
         f"Repo: {s.devin_repo} (base branch: {s.devin_base_branch})",
-        f"A {'production error' if sr.kind == 'error' else 'support request'} was raised in the Refunds Console "
-        f"(support request #{sr.id}).",
+        f"A {kind_label} was raised in the Refunds Console (request #{sr.id}).",
         "",
         f"Title: {sr.title}",
         f"Description: {sr.description or '-'}",
@@ -68,9 +70,15 @@ def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
         "Investigate the root cause, reproduce it with a failing test in backend/tests where possible, fix it, "
         "make sure CI (ruff, pytest, frontend lint/build) passes, and open a PR against "
         f"{s.devin_base_branch} that references "
-        f"support request #{sr.id} and trace {sr.trace_id or '-'}. Do not weaken any authorization checks or limits. "
-        "If it is not a code defect (e.g. a user question or expected policy denial), do not open a PR; "
-        "explain why in the session instead.",
+        f"request #{sr.id} and trace {sr.trace_id or '-'}. Do not weaken any authorization checks or limits. "
+        + (
+            "This is a feature request: implement the requested change end-to-end (backend, frontend, tests, "
+            "README if behaviour changes) following existing conventions. "
+            if sr.kind == "feature"
+            else ""
+        )
+        + "If it is not a code defect or a reasonable feature (e.g. a user question or expected policy denial), "
+        "do not open a PR; explain why in the session instead.",
     ]
     return "\n".join(lines)
 

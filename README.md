@@ -173,7 +173,13 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 
 ## Self-healing loop (Devin)
 
-- Any user can file `POST /support/requests {title, description, trace_id}`.
+- **Feature requests & problem reports**: the **Request a feature** button in the top bar (all roles) opens a
+  modal — pick *Feature request* or *Report a problem*, add a title/details, submit. With `DEVIN_API_KEY` +
+  `DEVIN_ORG_ID` configured (`AUTO_REMEDIATE_REQUESTS`, default on) the ticket is queued and a Devin session
+  starts immediately: it investigates and opens a PR against `dev` when the request is actionable. Without the
+  key the ticket is still recorded (`status: open`) for manual triage. Admins watch progress on the
+  **Support tickets** page (status, Devin session link, re-send failed tickets to Devin).
+- Any user can also file `POST /support/requests {kind: "feature"|"support", title, description, trace_id}`.
 - Every unhandled exception automatically opens an `error` ticket (deduped by exception fingerprint for `REMEDIATION_COOLDOWN_MINUTES`).
 - With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `dev` (`DEVIN_BASE_BRANCH`). The session URL is stored on the ticket (`GET /admin/support/requests`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
