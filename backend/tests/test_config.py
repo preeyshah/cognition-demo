@@ -22,15 +22,27 @@ def test_prod_requires_jwt_secret():
         Settings(environment="prod", _env_file=None)
 
 
+def test_prod_requires_webhook_secret(monkeypatch):
+    monkeypatch.delenv("PAYMENTS_WEBHOOK_SECRET", raising=False)
+    with pytest.raises(ValidationError, match="PAYMENTS_WEBHOOK_SECRET"):
+        Settings(environment="prod", jwt_secret="x" * 48, _env_file=None)
+
+
 def test_prod_disables_seed_by_default():
-    s = Settings(environment="prod", jwt_secret="x" * 48, _env_file=None)
+    s = Settings(environment="prod", jwt_secret="x" * 48, payments_webhook_secret="w" * 32, _env_file=None)
     assert not s.seed_on_startup
     assert not s.mock_sso_enabled
+    assert not s.payments_sandbox_controls
 
 
 def test_prod_explicit_seed_respected():
-    s = Settings(environment="prod", jwt_secret="x" * 48, seed_on_startup=True, _env_file=None)
+    s = Settings(environment="prod", jwt_secret="x" * 48, payments_webhook_secret="w" * 32, seed_on_startup=True, _env_file=None)
     assert s.seed_on_startup
+
+
+def test_prod_explicit_sandbox_controls_respected():
+    s = Settings(environment="prod", jwt_secret="x" * 48, payments_webhook_secret="w" * 32, payments_sandbox_controls=True, _env_file=None)
+    assert s.payments_sandbox_controls
 
 
 def test_invalid_environment_rejected():

@@ -14,7 +14,7 @@ from .models import (
     Role,
     User,
 )
-from .schemas import CustomerOut, Permissions, RefundEventOut, RefundOut, UserRef
+from .schemas import CustomerOut, PayoutOut, Permissions, RefundEventOut, RefundOut, UserRef
 
 
 def now_utc() -> datetime:
@@ -139,6 +139,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
             approve_blocked_reasons=[] if approve.allowed else approve.reasons,
             escalate_blocked_reasons=[] if escalate.allowed else escalate.reasons,
         ),
+        payout=PayoutOut.model_validate(refund.payout) if refund.payout else None,
     )
 
 
