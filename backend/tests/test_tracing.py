@@ -26,9 +26,12 @@ def test_every_request_gets_a_trace_id_linked_to_audit_and_events(client, db):
     assert client.get(f"/admin/traces/{trace_id}", headers=auth(j)).status_code == 403
 
 
-def test_incoming_trace_id_is_honoured_only_if_well_formed(client, db):
-    assert client.get("/health", headers={"X-Trace-Id": "client-abc-123"}).headers["X-Trace-Id"] == "client-abc-123"
-    assert client.get("/health", headers={"X-Trace-Id": "bad id\n"}).headers["X-Trace-Id"].startswith("tr_")
+def test_trace_ids_are_server_generated_and_unique(client, db):
+    a = client.get("/auth/me", headers={"X-Trace-Id": "client-abc-123"}).headers["X-Trace-Id"]
+    b = client.get("/auth/me", headers={"X-Trace-Id": "client-abc-123"}).headers["X-Trace-Id"]
+    assert a != b and a.startswith("tr_") and b.startswith("tr_")
+    db.expire_all()
+    assert "client_ref=client-abc-123" in db.get(RequestTrace, a).query
 
 
 def test_unhandled_error_returns_trace_and_opens_ticket_for_devin(client, db, monkeypatch):
@@ -51,6 +54,32 @@ def test_unhandled_error_returns_trace_and_opens_ticket_for_devin(client, db, mo
     assert len(tickets) == 1 and tickets[0].trace_id == res.headers["X-Trace-Id"]  # repeat is deduped
     assert started == [tickets[0].id]
     assert res2.status_code == 500
+
+
+def test_error_ticket_failure_still_returns_traced_500(client, monkeypatch):
+    from app import main
+
+    def broken(entry):
+        raise RuntimeError("db down")
+
+    for m in app.user_middleware:
+        if m.cls.__name__ == "TracingMiddleware":
+            monkeypatch.setitem(m.kwargs, "on_error", broken)
+    app.middleware_stack = None  # rebuild with the patched hook
+
+    @app.get("/__boom2")
+    def boom2():
+        raise RuntimeError("kaboom")
+
+    try:
+        res = client.get("/__boom2")
+    finally:
+        app.router.routes = [rt for rt in app.router.routes if getattr(rt, "path", None) != "/__boom2"]
+        for m in app.user_middleware:
+            if m.cls.__name__ == "TracingMiddleware":
+                m.kwargs["on_error"] = main.record_error
+        app.middleware_stack = None
+    assert res.status_code == 500 and res.json()["trace_id"] == res.headers["X-Trace-Id"]
 
 
 def test_support_request_flow(client, db, monkeypatch):

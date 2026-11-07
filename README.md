@@ -124,7 +124,7 @@ cd frontend && npm run build   # type-check + production build
 
 ## Monitoring & tracing
 
-Every API request gets a unique trace id (`tr_<uuid>`; a well-formed incoming `X-Trace-Id` / `X-Request-ID` is honoured). It is:
+Every API request gets a unique, server-generated trace id (`tr_<uuid>`; a client-sent `X-Trace-Id` / `X-Request-ID` is only kept as `client_ref` so callers cannot merge traces). It is:
 
 - returned on every response as `X-Trace-Id` (also in the body of 500s, and shown in UI error messages),
 - stored in `request_traces` (method, path, status, latency, actor, error + stack),
@@ -172,7 +172,7 @@ gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform output -raw deploy_role_
 gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
 gh variable set AWS_REGION        --body us-east-1
 # optional self-healing: gh variable set DEVIN_ORG_ID ...; after first deploy:
-# aws secretsmanager put-secret-value --secret-id refunds-console/devin-api-key --secret-string "$DEVIN_API_KEY"
+# aws secretsmanager put-secret-value --secret-id refunds-console/devin-api-key --secret-string "{\"DEVIN_API_KEY\":\"$DEVIN_API_KEY\"}"
 ```
 
 Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.

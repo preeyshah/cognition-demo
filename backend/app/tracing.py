@@ -78,8 +78,10 @@ class TracingMiddleware(BaseHTTPMiddleware):
         self._on_error = on_error
 
     async def dispatch(self, request: Request, call_next):
+        # Always server-generated so a caller can't merge their actions into someone else's trace.
+        trace_id = new_trace_id()
         incoming = request.headers.get(TRACE_HEADER) or request.headers.get("X-Request-ID")
-        trace_id = incoming if incoming and _INCOMING_OK.match(incoming) else new_trace_id()
+        client_ref = incoming if incoming and _INCOMING_OK.match(incoming) else None
         token = _trace_id.set(trace_id)
         actor_token = _actor.set({})
         start = time.perf_counter()
@@ -103,7 +105,7 @@ class TracingMiddleware(BaseHTTPMiddleware):
                 "trace_id": trace_id,
                 "method": request.method,
                 "path": request.url.path,
-                "query": request.url.query or None,
+                "query": ((f"client_ref={client_ref}&" if client_ref else "") + request.url.query) or None,
                 "status_code": response.status_code,
                 "duration_ms": duration_ms,
                 "actor_id": actor.get("id"),
@@ -114,7 +116,10 @@ class TracingMiddleware(BaseHTTPMiddleware):
                 log.info("request", extra={"fields": {k: v for k, v in entry.items() if k != "error"}})
                 self._record(entry)
             if error:
-                self._on_error(entry)
+                try:
+                    self._on_error(entry)
+                except Exception:  # noqa: BLE001 - e.g. DB down; the traced 500 must still reach the caller
+                    log.exception("failed to open error ticket")
             return response
         finally:
             _actor.reset(actor_token)
