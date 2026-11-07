@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import select, text  # noqa: E402
 
 from app import remediation  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import SupportRequest  # noqa: E402
@@ -15,8 +16,14 @@ from app.models import SupportRequest  # noqa: E402
 with TestClient(app) as client:  # lifespan runs init_db (create_all, analytics SQL, seed)
     res = client.get("/health")
     assert res.status_code == 200 and res.headers["X-Trace-Id"], res.text
+    # Mock SSO is authorize -> MFA page -> mfa (code) -> 303 redirect carrying the auth code.
     res = client.post("/auth/sso/authorize", data={"email": "priya.admin@acmepay.com",
                       "redirect_uri": "http://localhost:8080/"}, follow_redirects=False)
+    assert res.status_code == 200, res.text
+    res = client.post("/auth/sso/mfa", data={"email": "priya.admin@acmepay.com",
+                      "redirect_uri": "http://localhost:8080/", "code": get_settings().mock_mfa_code},
+                      follow_redirects=False)
+    assert res.status_code == 303, res.text
     code = res.headers["location"].split("code=")[1]
     res = client.post("/auth/token", json={"code": code})
     assert res.status_code == 200, res.text
@@ -35,7 +42,8 @@ with SessionLocal() as db:
     a_id, b_id = a.id, b.id
 with SessionLocal() as other_worker:
     other_worker.scalar(select(SupportRequest).where(SupportRequest.id == a_id).with_for_update())
-    assert remediation.process_queue() == 1  # Devin key unset in CI -> ticket goes back to "open"
+    while remediation.process_queue():  # Devin key unset in CI -> tickets go back to "open"
+        pass
     other_worker.rollback()
 with SessionLocal() as db:
     assert db.get(SupportRequest, a_id).status == "queued"

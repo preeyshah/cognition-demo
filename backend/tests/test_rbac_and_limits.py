@@ -139,6 +139,13 @@ def test_sso_flow_rejects_foreign_redirect(client, db):
     res = client.get("/auth/sso/login", params={"redirect_uri": "https://evil.example.com/"})
     assert res.status_code == 400
     res = client.post("/auth/sso/authorize", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/"}, follow_redirects=False)
+    assert res.status_code == 200 and "verification" in res.text
+    # Wrong MFA code: no redirect, no code issued.
+    bad = client.post("/auth/sso/mfa", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/", "code": "000000"},
+                      follow_redirects=False)
+    assert bad.status_code == 401
+    res = client.post("/auth/sso/mfa", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/", "code": "123456"},
+                      follow_redirects=False)
     assert res.status_code == 303
     code = res.headers["location"].split("code=")[1]
     tok = client.post("/auth/token", json={"code": code})
@@ -160,7 +167,8 @@ def test_sso_codes_are_tracked_in_the_database(client, db):
 
     db.add(UsedSsoCode(jti="stale", expires_at=now_utc() - timedelta(minutes=5)))
     db.commit()
-    res = client.post("/auth/sso/authorize", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/"}, follow_redirects=False)
+    res = client.post("/auth/sso/mfa", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/", "code": "123456"},
+                      follow_redirects=False)
     code = res.headers["location"].split("code=")[1]
     assert client.post("/auth/token", json={"code": code}).status_code == 200
     db.expire_all()

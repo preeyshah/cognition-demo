@@ -12,3 +12,7 @@ dist/
 backups/
 secrets.env
 *.gpg
+
+# local terraform variable overrides (commit *.tfvars.example instead)
+terraform.tfvars
+*.auto.tfvars
