@@ -75,6 +75,8 @@ app.add_middleware(TracingMiddleware, record=record_trace, on_error=record_error
 for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router, payouts.router,
           payouts.webhooks):
     app.include_router(r)
+if get_settings().mock_sso_enabled:
+    app.include_router(auth.sso_router)
 
 
 @app.get("/health")

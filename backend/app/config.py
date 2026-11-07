@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # "dev" enables the mock SSO IdP and demo seeding; "prod" disables both and hardens defaults.
+    environment: str = "dev"
     database_url: str = "postgresql+psycopg://refunds:refunds@localhost:5432/refunds"
     jwt_secret: str = ""  # unset => random per process (tokens die on restart)
     jwt_algorithm: str = "HS256"
@@ -35,7 +37,7 @@ class Settings(BaseSettings):
     devin_api_key: str = ""
     devin_org_id: str = ""
     devin_repo: str = "preeyshah/cognition-demo"
-    devin_base_branch: str = "main"
+    devin_base_branch: str = "dev"  # auto-fix PRs land on dev; promote via dev → main
     devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
     remediation_cooldown_minutes: int = 60
@@ -57,7 +59,40 @@ class Settings(BaseSettings):
     payout_worker_enabled: bool = True
     payout_worker_interval_s: float = 2.0
 
+    # Dev-only mock second factor on the SSO picker; ignored when ENVIRONMENT=prod.
+    mock_mfa_code: str = "123456"
+
+    # A burst of denied actions (guardrail/policy violations, probing) auto-opens a
+    # support ticket that the remediation loop hands to Devin. 0 disables the alert.
+    guardrail_alert_threshold: int = 50
+    guardrail_alert_window_minutes: int = 10
+
     seed_on_startup: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _prod_requires_jwt_secret(cls, data):
+        if isinstance(data, dict) and str(data.get("environment") or "dev").lower() == "prod":
+            if not data.get("jwt_secret"):
+                raise ValueError("JWT_SECRET must be set when ENVIRONMENT=prod")
+        return data
+
+    @model_validator(mode="after")
+    def _environment_defaults(self):
+        self.environment = self.environment.strip().lower()
+        if self.environment not in ("dev", "prod"):
+            raise ValueError("ENVIRONMENT must be 'dev' or 'prod'")
+        # Demo data (users, customers, refunds) must never appear in prod unless explicitly requested.
+        if self.environment == "prod" and "seed_on_startup" not in self.model_fields_set:
+            self.seed_on_startup = False
+        # Provider failure injection is a sandbox demo tool; never expose it in prod by default.
+        if self.environment == "prod" and "payments_sandbox_controls" not in self.model_fields_set:
+            self.payments_sandbox_controls = False
+        return self
+
+    @property
+    def mock_sso_enabled(self) -> bool:
+        return self.environment == "dev"
 
     @model_validator(mode="after")
     def _database_url_from_parts(self):

@@ -20,13 +20,65 @@ variable "vpc_cidr" {
 }
 
 variable "db_instance_class" {
-  type    = string
-  default = "db.t4g.micro"
+  description = "RDS instance class (e.g. db.t4g.micro, db.t4g.small, db.r6g.large). Change via PR to scale up/down."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial RDS storage in GiB."
+  type        = number
+  default     = 20
+}
+
+variable "db_max_allocated_storage" {
+  description = "RDS storage autoscaling ceiling in GiB."
+  type        = number
+  default     = 100
+}
+
+variable "db_parameters" {
+  description = "Extra Postgres parameter-group settings (name -> value), merged over the defaults in data.tf."
+  type        = map(string)
+  default     = {}
 }
 
 variable "api_desired_count" {
+  description = "Initial api task count; autoscaling owns it afterwards (min capacity)."
+  type        = number
+  default     = 2
+}
+
+variable "api_min_count" {
+  description = "Minimum api tasks (Application Auto Scaling floor)."
+  type        = number
+  default     = 2
+}
+
+variable "api_max_count" {
+  description = "Maximum api tasks (Application Auto Scaling ceiling)."
+  type        = number
+  default     = 8
+}
+
+variable "api_task_cpu" {
   type    = number
-  default = 2
+  default = 512
+}
+
+variable "api_task_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "provider_task_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "provider_task_memory" {
+  type    = number
+  default = 512
 }
 
 variable "devin_org_id" {

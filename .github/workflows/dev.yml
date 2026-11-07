@@ -1,0 +1,43 @@
+name: Dev deploy
+
+# Every merge to `dev` runs the full CI suite, then brings the whole stack up with
+# docker compose (the dev environment) and smoke-tests it. Production deploys only
+# happen from `main` via deploy.yml.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  smoke:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the dev stack
+        run: docker compose up -d --build
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs backend provider
+          exit 1
+      - name: Verify dev-mode auth config (mock SSO + MFA enabled)
+        run: |
+          curl -fsS http://localhost:8000/auth/config | grep -q '"mock_sso":true'
+          curl -fsS "http://localhost:8000/auth/sso/login?redirect_uri=http%3A%2F%2Flocalhost%3A8080%2F" | grep -q "Acme SSO"
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
