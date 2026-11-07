@@ -107,6 +107,6 @@ def test_support_config_is_admin_only_and_has_no_secrets(client, db):
     res = client.get("/admin/support/config", headers=auth(admin))
     assert res.status_code == 200
     body = res.json()
-    assert body["devin_enabled"] is False and body["base_branch"] == "main"
+    assert body["devin_enabled"] is False and body["base_branch"] == "dev"
     assert not any("key" in k for k in body)
     assert client.get("/admin/support/config", headers=auth(user(db, JORDAN))).status_code == 403

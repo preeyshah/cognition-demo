@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Self-healing demo: a planted bug on the `demo` branch -> 500 -> error ticket -> Devin session -> fix PR into `demo`.
 #
-#   scripts/demo.sh reset     rebuild `demo` = origin/main (or $DEMO_BASE) + planted bug, force-push it, close open PRs into `demo`
+#   scripts/demo.sh reset     rebuild `demo` = origin/dev (or $DEMO_BASE) + planted bug, force-push it, close open PRs into `demo`
 #   scripts/demo.sh up        run the `demo` branch with Docker Compose (fresh DB), PRs target `demo`  -> http://localhost:8080
 #   scripts/demo.sh trigger   reproduce from the CLI: add a new reviewer, then load Analytics (-> 500 + ticket)
 #   scripts/demo.sh status    list support tickets (status + Devin session link)
 #   scripts/demo.sh down      stop the demo stack and delete its volume
 #
-# `main` is never touched. The demo stack runs from a git worktree in .demo/ (gitignored).
+# `dev` and `main` are never touched. The demo stack runs from a git worktree in .demo/ (gitignored).
 # DEVIN_API_KEY comes from the env, AWS Secrets Manager or ~/.config/refunds-console (see scripts/secrets.sh);
 # without it tickets are recorded but nothing is sent to Devin.
 set -euo pipefail
@@ -15,14 +15,14 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 WT="$ROOT/.demo"
 BRANCH="${DEMO_BRANCH:-demo}"
-BASE="${DEMO_BASE:-main}"  # branch the demo is built from
+BASE="${DEMO_BASE:-dev}"  # branch the demo is built from
 PROJECT=refunds-demo
 API="${DEMO_API:-http://localhost:8000}"
 ADMIN=priya.admin@acmepay.com
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
-[[ "$BRANCH" != main && "$BRANCH" != master ]] || die "refusing to use $BRANCH as the demo branch"
+[[ "$BRANCH" != main && "$BRANCH" != master && "$BRANCH" != dev ]] || die "refusing to use $BRANCH as the demo branch"
 
 worktree_at() {  # check out $1 (detached) in .demo/, discarding anything left over from the last run
   git fetch -q origin "$2"
@@ -72,10 +72,13 @@ cmd_up() {
   log "Story: Team & limits -> add a reviewer -> Analytics fails with a trace id -> Support tickets -> Open session"
 }
 
-token() {  # mock-SSO login as the admin (authorization code -> bearer token)
+token() {  # mock-SSO login as the admin (authorize -> MFA -> authorization code -> bearer token)
   local loc code
-  loc=$(curl -fsS -o /dev/null -w '%{redirect_url}' -X POST "$API/auth/sso/authorize" \
-    --data-urlencode "email=$ADMIN" --data-urlencode "redirect_uri=http://localhost:8080/")
+  curl -fsS -o /dev/null -X POST "$API/auth/sso/authorize" \
+    --data-urlencode "email=$ADMIN" --data-urlencode "redirect_uri=http://localhost:8080/"
+  loc=$(curl -fsS -o /dev/null -w '%{redirect_url}' -X POST "$API/auth/sso/mfa" \
+    --data-urlencode "email=$ADMIN" --data-urlencode "redirect_uri=http://localhost:8080/" \
+    --data-urlencode "code=${MOCK_MFA_CODE:-123456}")
   code="${loc#*code=}"
   curl -fsS -X POST "$API/auth/token" -H 'Content-Type: application/json' -d "{\"code\":\"$code\"}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
