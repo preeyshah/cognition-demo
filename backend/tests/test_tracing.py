@@ -21,7 +21,8 @@ def test_every_request_gets_a_trace_id_linked_to_audit_and_events(client, db):
     admin = user(db, "priya.admin@acmepay.com")
     bundle = client.get(f"/admin/traces/{trace_id}", headers=auth(admin)).json()
     assert bundle["request"]["path"] == f"/refunds/{r.id}/approve"
-    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved"]
+    # The first payout attempt runs after the response but stays on the approval's trace.
+    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved", "payout_queued", "payout_submitted"]
     # Traces are admin-only.
     assert client.get(f"/admin/traces/{trace_id}", headers=auth(j)).status_code == 403
 
