@@ -101,8 +101,7 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
     decided = [r for r in rows if r.decided_at]
     approved = [r for r in rows if r.status == RefundStatus.approved]
     ever_escalated = [r for r in rows if r.escalation_reason]
-    sla_hours = policies["sla_hours"]
-    breached = [r for r in decided if _hours(r) > sla_hours] + [
+    breached = [r for r in decided if aware(r.decided_at) > aware(r.sla_due_at)] + [
         r for r in rows if not r.decided_at and aware(r.sla_due_at) < now
     ]
 
