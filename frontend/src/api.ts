@@ -29,6 +29,29 @@ export interface Permissions {
   escalate_blocked_reasons: string[]
 }
 
+export type PayoutStatus = 'queued' | 'retry_scheduled' | 'processing' | 'succeeded' | 'failed'
+
+export interface Payout {
+  id: number
+  provider: string
+  status: PayoutStatus
+  amount_cents: number
+  currency: string
+  provider_refund_id: string | null
+  idempotency_key: string
+  attempts: number
+  manual_retries: number
+  next_attempt_at: string | null
+  last_http_status: number | null
+  last_error: string | null
+  failure_code: string | null
+  succeeded_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const payoutInFlight = (p: Payout | null | undefined) => !!p && p.status !== 'succeeded' && p.status !== 'failed'
+
 export interface Refund {
   id: number
   reference: string
@@ -51,6 +74,7 @@ export interface Refund {
   overdue: boolean
   created_at: string
   permissions: Permissions
+  payout: Payout | null
 }
 
 export interface RefundEvent {

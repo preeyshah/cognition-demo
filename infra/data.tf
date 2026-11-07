@@ -3,18 +3,24 @@ resource "aws_kms_key" "app" {
   enable_key_rotation = true
 }
 
+locals {
+  # Default Postgres settings; var.db_parameters can override or extend these via PR.
+  db_pg_parameters = merge({
+    "rds.force_ssl"              = "1"
+    "log_min_duration_statement" = "500"
+  }, var.db_parameters)
+}
+
 resource "aws_db_parameter_group" "pg" {
   name   = "${var.name}-pg16"
   family = "postgres16"
 
-  parameter {
-    name  = "rds.force_ssl"
-    value = "1"
-  }
-
-  parameter {
-    name  = "log_min_duration_statement"
-    value = "500"
+  dynamic "parameter" {
+    for_each = local.db_pg_parameters
+    content {
+      name  = parameter.key
+      value = parameter.value
+    }
   }
 }
 
@@ -24,8 +30,8 @@ resource "aws_db_instance" "main" {
   engine_version = "16"
   instance_class = var.db_instance_class
 
-  allocated_storage     = 20
-  max_allocated_storage = 100
+  allocated_storage     = var.db_allocated_storage
+  max_allocated_storage = var.db_max_allocated_storage
   storage_encrypted     = true
   kms_key_id            = aws_kms_key.app.arn
 
@@ -67,6 +73,11 @@ resource "random_password" "provider_key" {
   special = false
 }
 
+resource "random_password" "payments_webhook" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "app" {
   name       = "${var.name}/app"
   kms_key_id = aws_kms_key.app.arn
@@ -75,8 +86,9 @@ resource "aws_secretsmanager_secret" "app" {
 resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
-    JWT_SECRET       = random_password.jwt.result
-    PROVIDER_API_KEY = random_password.provider_key.result
+    JWT_SECRET              = random_password.jwt.result
+    PROVIDER_API_KEY        = random_password.provider_key.result
+    PAYMENTS_WEBHOOK_SECRET = random_password.payments_webhook.result
   })
 }
 

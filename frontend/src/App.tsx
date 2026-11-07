@@ -6,9 +6,9 @@ import { useAuth } from './auth'
 import { RoleBadge, Spinner } from './components/ui'
 import { RequestFeature } from './components/RequestFeature'
 import { money } from './format'
-import { AllRefunds, AuditLog, Escalations, Policies, Team, ViewAs } from './pages/Admin'
-import { SupportTickets } from './pages/Support'
+import { AllRefunds, AuditLog, Escalations, Policies, SupportTickets, Team, ViewAs } from './pages/Admin'
 import { Analytics } from './pages/Analytics'
+import { Payouts } from './pages/Payouts'
 import { Login } from './pages/Login'
 import { ReviewerHistory, ReviewerQueue } from './pages/ReviewerQueue'
 
@@ -30,6 +30,7 @@ function pagesFor(user: User): Page[] {
       { path: '/analytics', label: 'Analytics', element: <Analytics user={user} /> },
       { path: '/escalations', label: 'Escalations', element: <Escalations /> },
       { path: '/refunds', label: 'All refunds', element: <AllRefunds canCreate /> },
+      { path: '/payouts', label: 'Payouts', element: <Payouts /> },
       { path: '/team', label: 'Team & limits', element: <Team me={user} /> },
       { path: '/policies', label: 'Policies', element: <Policies /> },
       { path: '/audit', label: 'Audit log', element: <AuditLog /> },

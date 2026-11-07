@@ -90,6 +90,14 @@ def create_support_request(
     return _support_out(sr)
 
 
+@router.get("/admin/support/config")
+def support_config(_: User = Depends(admin_only)):
+    """Whether tickets are handed to Devin, and where its PRs go (no secrets)."""
+    s = get_settings()
+    return {"devin_enabled": remediation.enabled(), "auto_remediate_errors": s.auto_remediate_errors,
+            "repo": s.devin_repo, "base_branch": s.devin_base_branch, "max_acu": s.devin_max_acu}
+
+
 @router.get("/admin/support/requests")
 def list_support_requests(
     status: str | None = None, _: User = Depends(admin_only), db: Session = Depends(get_db)

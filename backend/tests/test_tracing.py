@@ -21,7 +21,8 @@ def test_every_request_gets_a_trace_id_linked_to_audit_and_events(client, db):
     admin = user(db, "priya.admin@acmepay.com")
     bundle = client.get(f"/admin/traces/{trace_id}", headers=auth(admin)).json()
     assert bundle["request"]["path"] == f"/refunds/{r.id}/approve"
-    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved"]
+    # The first payout attempt runs after the response but stays on the approval's trace.
+    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved", "payout_queued", "payout_submitted"]
     # Traces are admin-only.
     assert client.get(f"/admin/traces/{trace_id}", headers=auth(j)).status_code == 403
 
@@ -114,3 +115,13 @@ def test_support_request_kinds(client, db):
     sr = db.get(SupportRequest, res.json()["id"])
     prompt = remediation.build_prompt(sr, None)
     assert "feature request" in prompt and "implement the requested change" in prompt
+
+
+def test_support_config_is_admin_only_and_has_no_secrets(client, db):
+    admin = user(db, "priya.admin@acmepay.com")
+    res = client.get("/admin/support/config", headers=auth(admin))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["devin_enabled"] is False and body["base_branch"] == "dev"
+    assert not any("key" in k for k in body)
+    assert client.get("/admin/support/config", headers=auth(user(db, JORDAN))).status_code == 403

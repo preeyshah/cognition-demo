@@ -3,14 +3,21 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.config import get_settings
 from app.db import engine
 from app.main import app
 
 with TestClient(app) as client:  # lifespan runs init_db (create_all, analytics SQL, seed)
     res = client.get("/health")
     assert res.status_code == 200 and res.headers["X-Trace-Id"], res.text
+    # Mock SSO is authorize -> MFA page -> mfa (code) -> 303 redirect carrying the auth code.
     res = client.post("/auth/sso/authorize", data={"email": "priya.admin@acmepay.com",
                       "redirect_uri": "http://localhost:8080/"}, follow_redirects=False)
+    assert res.status_code == 200, res.text
+    res = client.post("/auth/sso/mfa", data={"email": "priya.admin@acmepay.com",
+                      "redirect_uri": "http://localhost:8080/", "code": get_settings().mock_mfa_code},
+                      follow_redirects=False)
+    assert res.status_code == 303, res.text
     code = res.headers["location"].split("code=")[1]
     res = client.post("/auth/token", json={"code": code})
     assert res.status_code == 200, res.text
