@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .models import RequestTrace
-from .remediation import record_error
+from .remediation import record_error, start_worker
 from .routers import admin, auth, dashboard, monitoring, refunds
 from .seed import seed
 from .tracing import TRACE_HEADER, TracingMiddleware, configure_logging
@@ -51,7 +51,10 @@ def init_db() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    stop_worker = start_worker() if get_settings().remediation_worker_enabled else None
     yield
+    if stop_worker:
+        stop_worker()
 
 
 configure_logging(get_settings().log_level)

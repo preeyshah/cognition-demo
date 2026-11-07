@@ -208,3 +208,12 @@ class SupportRequest(Base):
     remediation_error: Mapped[str | None] = mapped_column(Text)
     created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class UsedSsoCode(Base):
+    """Redeemed one-time SSO codes (by jti), shared by every API process so a code works exactly once."""
+
+    __tablename__ = "used_sso_codes"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
