@@ -173,6 +173,8 @@ gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
 gh variable set AWS_REGION        --body us-east-1
 # optional self-healing: gh variable set DEVIN_ORG_ID ...; after first deploy:
 # aws secretsmanager put-secret-value --secret-id refunds-console/devin-api-key --secret-string "{\"DEVIN_API_KEY\":\"$DEVIN_API_KEY\"}"
+# ECS reads secrets at task start, so roll the API tasks to pick the key up:
+# aws ecs update-service --cluster refunds-console --service api --force-new-deployment
 ```
 
 Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
