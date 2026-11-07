@@ -12,3 +12,4 @@ dist/
 backups/
 secrets.env
 *.gpg
+.demo/
