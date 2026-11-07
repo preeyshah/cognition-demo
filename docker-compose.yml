@@ -29,7 +29,7 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@db:5432/refunds
-      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
       ALLOWED_REDIRECT_ORIGINS: http://localhost:8080,http://localhost:5173

@@ -1,5 +1,7 @@
+import secrets
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +24,12 @@ class Settings(BaseSettings):
     history_provider_timeout_s: float = 3.0
 
     seed_on_startup: bool = True
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _random_secret_if_blank(cls, v: str) -> str:
+        # Blank means "not configured": use an ephemeral random key rather than a known default.
+        return v or secrets.token_urlsafe(48)
 
     @property
     def redirect_origins(self) -> list[str]:
