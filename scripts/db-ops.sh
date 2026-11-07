@@ -14,7 +14,17 @@
 # No url = the local Compose database. Terraform-managed AWS deploys already get all of this (infra/db_resilience.tf).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[[ -f .env ]] && { set -a; . ./.env; set +a; }
+load_dotenv() {  # KEY=VALUE lines like Compose: no shell evaluation, never overrides exported vars
+  [[ -f .env ]] || return 0
+  local line k v
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    k="${line%%=*}"; v="${line#*=}"; k="${k//[[:space:]]/}"; k="${k#export}"
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${!k+x}" ]] && export "$k=$v"
+  done < .env
+}
+load_dotenv
 # shellcheck source=scripts/secrets.sh
 source scripts/secrets.sh 2>/dev/null || true
 

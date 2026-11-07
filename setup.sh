@@ -8,10 +8,27 @@
 #   ./setup.sh down                  Stop the local stack and delete its volume
 set -euo pipefail
 cd "$(dirname "$0")"
-if [[ -f .env ]]; then set -a; . ./.env; set +a; fi  # same overrides Compose reads
+load_dotenv() {  # KEY=VALUE lines like Compose: no shell evaluation, never overrides exported vars
+  [[ -f .env ]] || return 0
+  local line k v
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    k="${line%%=*}"; v="${line#*=}"; k="${k//[[:space:]]/}"; k="${k#export}"
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${!k+x}" ]] && export "$k=$v"
+  done < .env
+}
+load_dotenv
 # DEVIN_API_KEY etc.: env > AWS Secrets Manager > ~/.config/refunds-console (see scripts/secrets.sh)
 [[ "${1:-}" == down ]] || source scripts/secrets.sh
-pg_pw() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${POSTGRES_PASSWORD:-refunds}"; }
+pg_pw() {  # URL-encode the DB password in pure bash (local/down must work without Python)
+  local s="${POSTGRES_PASSWORD:-refunds}" o="" c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in [a-zA-Z0-9.~_-]) o+="$c" ;; *) printf -v c '%%%02X' "'$c"; o+="$c" ;; esac
+  done
+  printf '%s' "$o"
+}
 
 LOCAL_URL="postgresql+psycopg://refunds:$(pg_pw)@db:5432/refunds"  # the Compose Postgres
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
