@@ -1,0 +1,7 @@
+line-length = 130
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I", "B", "UP"]
+# B008: FastAPI's Depends()/Query() defaults are idiomatic. E501: long SQL/HTML/policy strings read better unwrapped.
+ignore = ["B008", "E501"]

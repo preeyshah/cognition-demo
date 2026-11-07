@@ -1,0 +1,73 @@
+name: Deploy
+
+# Every push to main runs the full CI suite; only if it passes do we build, migrate infra and roll out.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> short-lived AWS credentials, no stored keys
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TF_VAR_image_tag: ${{ github.sha }}
+      TF_VAR_devin_org_id: ${{ vars.DEVIN_ORG_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=$AWS_REGION"
+      - name: Create ECR repo on first deploy
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve -target=aws_ecr_repository.backend
+      - name: Build + push backend image
+        run: |
+          REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%%/*}"
+          docker build -t "$REPO:$GITHUB_SHA" backend
+          docker push "$REPO:$GITHUB_SHA"
+      - name: Terraform apply (infra + new task definitions)
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve
+      - name: Wait for ECS rollout
+        run: aws ecs wait services-stable --cluster "$(terraform -chdir=infra output -raw ecs_cluster)" --services api provider
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build + publish frontend
+        working-directory: frontend
+        run: |
+          npm ci && npm run build
+          aws s3 sync dist "s3://$(terraform -chdir=../infra output -raw frontend_bucket)" --delete
+          aws cloudfront create-invalidation --distribution-id "$(terraform -chdir=../infra output -raw cloudfront_distribution_id)" --paths '/*'
+      - name: Smoke test
+        run: |
+          URL=$(terraform -chdir=infra output -raw app_url)
+          curl -fsS "$URL/api/health" -D - | grep -i x-trace-id
+          echo "Deployed $GITHUB_SHA to $URL" >> "$GITHUB_STEP_SUMMARY"
