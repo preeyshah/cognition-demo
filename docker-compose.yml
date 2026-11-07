@@ -35,7 +35,8 @@ services:
       DB_USER: refunds
       DB_PASSWORD: ${POSTGRES_PASSWORD:-refunds}
       DB_SSLMODE: disable  # private Compose network
-      JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start
+      JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start (required when ENVIRONMENT=prod)
+      ENVIRONMENT: ${ENVIRONMENT:-dev}  # dev = mock SSO + demo seed; prod disables both
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
       ALLOWED_REDIRECT_ORIGINS: http://localhost:8080,http://localhost:5173
@@ -43,7 +44,7 @@ services:
       TRUSTED_PROXY_HOPS: "1"  # nginx
       DEVIN_API_KEY: ${DEVIN_API_KEY:-}  # blank => self-healing loop records tickets but doesn't call Devin
       DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
-      DEVIN_BASE_BRANCH: ${DEVIN_BASE_BRANCH:-main}
+      DEVIN_BASE_BRANCH: ${DEVIN_BASE_BRANCH:-dev}
       DEVIN_MAX_ACU: ${DEVIN_MAX_ACU:-10}
     ports:
       - "8000:8000"

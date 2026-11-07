@@ -108,8 +108,8 @@ resource "aws_ecs_task_definition" "api" {
   family                   = "${var.name}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 1024
+  cpu                      = var.api_task_cpu
+  memory                   = var.api_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
   runtime_platform {
@@ -128,6 +128,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "ALLOWED_REDIRECT_ORIGINS", value = local.app_origin },
       { name = "CORS_ORIGINS", value = local.app_origin },
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
+      { name = "ENVIRONMENT", value = "prod" },
       { name = "DEVIN_REPO", value = var.github_repo },
       { name = "DEVIN_MAX_ACU", value = tostring(var.devin_max_acu) },
     ]
@@ -147,8 +148,8 @@ resource "aws_ecs_task_definition" "provider" {
   family                   = "${var.name}-provider"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = var.provider_task_cpu
+  memory                   = var.provider_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
   container_definitions = jsonencode([merge(local.container_security, {
@@ -169,6 +170,11 @@ resource "aws_ecs_service" "api" {
   desired_count          = var.api_desired_count
   launch_type            = "FARGATE"
   enable_execute_command = false
+
+  # Application Auto Scaling owns the running count after creation (see autoscaling.tf).
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
   network_configuration {
     subnets          = module.vpc.private_subnets
     security_groups  = [aws_security_group.api.id]

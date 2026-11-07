@@ -9,7 +9,7 @@ screens, approvals, connectors and analytics.
 | --- | --- |
 | Role-based screens | One React app; navigation, data and buttons change per role (admin / reviewer / viewer) |
 | Approval workflows | Approve / reject / escalate with notes, per-refund + daily limits, admin sign-off for escalations |
-| Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`) → swap in Okta / Entra / Google with config |
+| Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`, dev only) → swap in Okta / Entra / Google with config |
 | Dataverse tables | PostgreSQL schema via SQLAlchemy models, constraints and indexes |
 | Connectors | Authenticated HTTP client to a third-party "PayCore" customer-history API (mocked, with API key) |
 | Power BI dashboards | Analytics page (Recharts), CSV export, Postgres BI views (`v_refund_facts`, …) |
@@ -62,9 +62,13 @@ backend/   FastAPI + SQLAlchemy 2 + PostgreSQL 16, JWT auth            :8000  (O
 backend/mock_provider/  stand-in third-party customer-history API      :9000
 ```
 
-Tables: `users`, `customers`, `refund_requests`, `refund_events` (lifecycle timeline), `audit_log`,
-`policy_settings`. BI views and the audit trigger live in [`backend/app/sql/analytics.sql`](backend/app/sql/analytics.sql).
-Demo data (≈170 refunds over 30 days) is seeded deterministically on first start.
+Tables: `users`, `customers`, `refund_requests` (status, reason, risk, amounts, SLA, assignee/escalator/decider),
+`refund_events` (lifecycle timeline), `audit_log` (append-only), `policy_settings`, `request_traces` (per-request
+traceability), and `support_requests` (support/error tickets for remediation). Postgres BI views
+(`v_refund_facts`, `v_reviewer_daily`, `v_denied_actions`) and the audit-log immutability trigger live in
+[`backend/app/sql/analytics.sql`](backend/app/sql/analytics.sql); the SQLAlchemy models are in
+[`backend/app/models.py`](backend/app/models.py).
+Demo data (≈170 refunds over 30 days) is seeded deterministically on first start in `dev` only — in `prod` seeding is off unless `SEED_ON_STARTUP=true` is set explicitly.
 
 ## Run it
 
@@ -73,8 +77,14 @@ Demo data (≈170 refunds over 30 days) is seeded deterministically on first sta
 ```bash
 docker compose up --build
 ```
-Open http://localhost:8080, click **Sign in with Acme SSO** and pick an identity. API docs: http://localhost:8000/docs.
+Open http://localhost:8080, click **Sign in with Acme SSO**, pick an identity, then enter the mock second-factor
+code **123456** (configurable via `MOCK_MFA_CODE`; the whole mock IdP only exists when `ENVIRONMENT=dev`).
+API docs: http://localhost:8000/docs.
 Reset demo data with `docker compose down -v`.
+
+`ENVIRONMENT` defaults to `dev` everywhere (local dev, Compose, tests). Set `ENVIRONMENT=prod` for a hardened
+deployment: the mock IdP endpoints are not mounted, demo seeding is disabled unless `SEED_ON_STARTUP=true`, and a
+missing `JWT_SECRET` fails startup. The SPA learns the mode from the public `GET /api/auth/config` endpoint.
 
 ### Option B — local dev
 
@@ -95,14 +105,25 @@ npm run dev                                       # http://localhost:5173
 ```
 
 Config is via env vars (see [`backend/app/config.py`](backend/app/config.py) and [`.env.example`](.env.example)):
-`DATABASE_URL`, `JWT_SECRET`, `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP`.
+`ENVIRONMENT`, `DATABASE_URL`, `JWT_SECRET` (required in prod), `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP` (off by default in prod), `MOCK_MFA_CODE` (dev SSO second factor), `GUARDRAIL_ALERT_THRESHOLD` / `GUARDRAIL_ALERT_WINDOW_MINUTES` (auto-ticket on denied-action spikes).
 Frontend: `VITE_API_URL` (defaults to `/api`).
 
 ### Tests
 
 ```bash
-cd backend && pytest -q        # RBAC, limits, escalation, four-eyes, PII masking, audit, SSO
+cd backend && pytest -q        # RBAC, limits, escalation, four-eyes, PII masking, audit, SSO + MFA
 cd frontend && npm run build   # type-check + production build
+cd frontend && npm run test:e2e # Playwright end-to-end (see below)
+```
+
+**End-to-end tests** ([`frontend/e2e/`](frontend/e2e/)): Playwright specs covering the full mock-SSO + 2FA login,
+the reviewer approve/reject/history workflow, admin surfaces and viewer restrictions. They run against a live
+stack — bring it up first (`docker compose up -d --build`, or `npm run dev` + backend on :8000), then:
+
+```bash
+cd frontend
+npx playwright install chromium   # one-time browser download
+npm run test:e2e                  # E2E_BASE_URL overrides the default http://localhost:8080
 ```
 
 ## Demo users
@@ -117,7 +138,7 @@ cd frontend && npm run build   # type-check + production build
 
 ## Production notes
 
-- Replace the mock SSO with a real OIDC provider (the frontend already uses the redirect + code-exchange flow) and set a strong `JWT_SECRET`.
+- Run with `ENVIRONMENT=prod` (the AWS Terraform deployment does): this unmounts the mock SSO IdP, disables demo seeding and requires a strong `JWT_SECRET`. Then replace the mock SSO with a real OIDC provider — the frontend already uses the redirect + code-exchange flow.
 - Replace `mock_provider` with the real vendor URL/key via `HISTORY_PROVIDER_URL` / `HISTORY_PROVIDER_API_KEY` (store as secrets).
 - Use Alembic migrations instead of `create_all` once the schema stabilises.
 - The same pattern (policy module + audit log + role-aware React screens) is a template for the KYC review queue and feature-flag admin panel.
@@ -154,8 +175,12 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 
 - Any user can file `POST /support/requests {title, description, trace_id}`.
 - Every unhandled exception automatically opens an `error` ticket (deduped by exception fingerprint for `REMEDIATION_COOLDOWN_MINUTES`).
-- With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `main`. The session URL is stored on the ticket (`GET /admin/support/requests`).
+- With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `dev` (`DEVIN_BASE_BRANCH`). The session URL is stored on the ticket (`GET /admin/support/requests`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
+- **Guardrail alerts**: every policy/RBAC denial is audited; a spike of `GUARDRAIL_ALERT_THRESHOLD` (default 50)
+  denied actions within `GUARDRAIL_ALERT_WINDOW_MINUTES` (default 10) auto-opens a `guardrail` support ticket —
+  deduped while one is open — which goes through the same Devin remediation loop, so a misfiring policy or an
+  attack probe results in a investigated PR rather than a silent log line. Set the threshold to `0` to disable.
 
 ## Secrets (`scripts/secrets.sh`)
 
@@ -190,10 +215,17 @@ scripts/db-ops.sh aws-harden <rds-id> [--replica]   # apply all of the above to 
 scripts/db-ops.sh aws-status <rds-id>
 ```
 
-## CI/CD
+## CI/CD & branch flow
 
-- `.github/workflows/ci.yml` (every PR and push): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
-- `.github/workflows/deploy.yml` (push to `main`): reruns CI, then via GitHub OIDC (no stored AWS keys) builds/pushes the image to ECR, `terraform apply`s with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`. Skipped until the repo variable `AWS_DEPLOY_ROLE_ARN` is set.
+- **Branch model**: all work lands on `dev` via PR. Merging to `dev` runs CI and then the *Dev deploy* workflow,
+  which brings the whole stack up with `docker compose` and smoke-tests `/health`, `/auth/config` and the mock
+  SSO page — that merge **is** the dev deployment. Production only moves via a `dev` → `main` PR; a CI check
+  (`branch-flow.yml`) rejects any other PR targeting `main`. (Hotfix exception: temporarily allow the PR in
+  GitHub branch protection / merge it as an admin, then back-merge to `dev`.)
+- `.github/workflows/ci.yml` (every PR and push to `main`/`dev`): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
+- `.github/workflows/dev.yml` (push to `dev`): CI, then the docker-compose dev deploy + smoke test above.
+- `.github/workflows/infra-plan.yml` (PRs touching `infra/`): `terraform plan` against real AWS state via a read-only OIDC role, posted to the job summary. Enable by setting the repo variable `AWS_PLAN_ROLE_ARN` (see below).
+- `.github/workflows/deploy.yml` (push to `main` only): reruns CI, then via GitHub OIDC (no stored AWS keys) builds/pushes the image to ECR, `terraform apply`s with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`. The AWS deployment runs with `ENVIRONMENT=prod` (mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ROLE_ARN` is set.
 
 ## AWS infrastructure (`infra/`, Terraform)
 
@@ -202,7 +234,10 @@ Browser ──HTTPS──> CloudFront (+ AWS WAF: IP reputation, OWASP common, b
                     ├── /*     -> S3 (private, OAC only)                      React SPA
                     └── /api/* -> ALB (SG: CloudFront prefix list only, secret origin header, else 403)
                                  └── ECS Fargate "api" (private subnets, non-root, read-only FS)
-                                      ├── RDS Postgres 16 (DB subnets, no public IP, KMS, force SSL, backups, deletion protection)
+                                      ├── autoscaling: target tracking on CPU (60%), memory (75%),
+                                      │   requests/target (1000/min); bounds api_min_count..api_max_count
+                                      ├── RDS Postgres 16 (DB subnets, no public IP, KMS, force SSL,
+                                      │   storage autoscaling, backups, deletion protection)
                                       └── ECS "provider" (mock PayCore, reachable only from api via Cloud Map)
 Secrets Manager (KMS): RDS-managed DB password, JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
 ```
@@ -212,8 +247,9 @@ Same-origin SPA + API means the browser never makes cross-origin calls; CORS and
 One-time setup (admin credentials, dedicated AWS account):
 
 ```bash
-cd infra/bootstrap && terraform init && terraform apply          # state bucket, lock table, GitHub OIDC deploy role
+cd infra/bootstrap && terraform init && terraform apply          # state bucket, lock table, GitHub OIDC deploy + plan roles
 gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform output -raw deploy_role_arn)"
+gh variable set AWS_PLAN_ROLE_ARN  --body "$(terraform output -raw plan_role_arn)"   # enables infra-plan on PRs
 gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
 gh variable set AWS_REGION        --body us-east-1
 # optional self-healing: after the first deploy, `scripts/secrets.sh push` stores the Devin key in Secrets Manager.
@@ -221,6 +257,8 @@ gh variable set AWS_REGION        --body us-east-1
 # aws ecs update-service --cluster refunds-console --service api --force-new-deployment
 ```
 
+Every infra setting is a Terraform variable — change it in a PR (see [`infra/terraform.tfvars.example`](infra/terraform.tfvars.example) for the full list): instance class and storage for the database, Postgres parameters (`db_parameters`, e.g. `work_mem`), task cpu/memory, autoscaling bounds, VPC CIDR, WAF rate limits. On the PR, the **Infra plan** workflow shows the exact diff; merging to `main` applies it. Parameter-group changes that need a reboot show as pending-reboot — reboot the instance from the RDS console or `aws rds reboot-db-instance` after merge.
+
 Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
 
-Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data), the SSO is a mock (swap for Okta/Entra OIDC), and the single-use SSO code store is per-process.
+Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data), prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only), and the single-use SSO code store is per-process.
