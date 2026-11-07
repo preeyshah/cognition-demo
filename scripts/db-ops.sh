@@ -75,11 +75,10 @@ SQL
 }
 
 backup() {
-  mkdir -p backups; chmod 700 backups
+  umask 077; mkdir -p backups; chmod 700 backups
   local f; f="backups/refunds-$(date -u +%Y%m%dT%H%M%SZ).dump"
   log "pg_dump -> $f"
-  pg "${1:-}" pg_dump -Fc --no-owner > "$f"
-  chmod 600 "$f"
+  pg "${1:-}" pg_dump -Fc --no-owner > "$f" || { rm -f "$f"; die "pg_dump failed"; }
   docker run --rm -i "$PG_IMAGE" pg_restore --list < "$f" >/dev/null || die "backup $f is unreadable"
   log "verified ($(du -h "$f" | cut -f1)); rotating to ${BACKUP_KEEP:-7}"
   ls -1t backups/*.dump | tail -n +"$((${BACKUP_KEEP:-7} + 1))" | xargs -r rm -f
@@ -155,10 +154,15 @@ aws_harden() {
         {\"RuleName\": \"weekly\", \"TargetBackupVaultName\": \"$NAME-primary\", \"ScheduleExpression\": \"cron(0 6 ? * SUN *)\",
          \"Lifecycle\": {\"DeleteAfterDays\": 180}, \"CopyActions\": [{\"DestinationBackupVaultArn\": \"$dr_vault\", \"Lifecycle\": {\"DeleteAfterDays\": 180}}]}
       ]}")
-    aws iam create-service-linked-role --aws-service-name backup.amazonaws.com >/dev/null 2>&1 || true
+    aws iam create-role --role-name "$NAME-backup" --assume-role-policy-document \
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"backup.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null 2>&1 || true
+    for p in AWSBackupServiceRolePolicyForBackup AWSBackupServiceRolePolicyForRestores; do
+      aws iam attach-role-policy --role-name "$NAME-backup" --policy-arn "arn:aws:iam::aws:policy/service-role/$p"
+    done
+    sleep 10  # IAM propagation
     aws backup create-backup-selection --region "$REGION" --backup-plan-id "$plan_id" --backup-selection "{
       \"SelectionName\": \"$NAME-db\", \"Resources\": [\"$arn\"],
-      \"IamRoleArn\": \"arn:aws:iam::$acct:role/aws-service-role/backup.amazonaws.com/AWSServiceRoleForBackup\"}" >/dev/null
+      \"IamRoleArn\": \"arn:aws:iam::$acct:role/$NAME-backup\"}" >/dev/null
   fi
 
   if [[ "$replica" == "--replica" ]]; then
