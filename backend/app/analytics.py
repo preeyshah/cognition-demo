@@ -74,7 +74,7 @@ def summary_for(db: Session, user: User) -> dict:
     pending = [r for r in open_rows if r.status == RefundStatus.pending]
     escalated = [r for r in open_rows if r.status == RefundStatus.escalated]
     overdue = [r for r in open_rows if aware(r.sla_due_at) < now]
-    decided_30 = [r for r in rows if r.decided_at and aware(r.decided_at) >= now - timedelta(days=30)]
+    decided_30 = db.scalars(select(RefundRequest).where(RefundRequest.decided_at >= now - timedelta(days=30))).unique().all()
     approved_30 = [r for r in decided_30 if r.status == RefundStatus.approved]
     approved_today = [r for r in approved_30 if aware(r.decided_at) >= sod]
     return {
