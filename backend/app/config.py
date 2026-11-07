@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
     remediation_cooldown_minutes: int = 60
+    remediation_worker_enabled: bool = True  # drains queued tickets to Devin
+    remediation_poll_seconds: float = 10.0
 
     history_provider_url: str = "http://localhost:9000"
     history_provider_api_key: str = "demo-provider-key"

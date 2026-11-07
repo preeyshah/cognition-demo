@@ -227,6 +227,7 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 - With `DEVIN_API_KEY` set (a legacy `apk_` key uses `POST /v1/sessions`; an org key also needs `DEVIN_ORG_ID` and uses `POST /v3/organizations/{org}/sessions`), error tickets start a Devin session automatically (`AUTO_REMEDIATE_ERRORS`). Support tickets are sent with `POST /admin/support/requests/{id}/remediate` or the **Send to Devin** button. The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `DEVIN_BASE_BRANCH` (default `dev`). Each session is capped at `DEVIN_MAX_ACU` (default 10).
 - Admins see every ticket, its status and Devin session link on the **Support tickets** page (`GET /admin/support/requests`, `GET /admin/support/config`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
+- Hand-off is durable: tickets are queued in Postgres (`status=queued`) and a worker in each API process sends them (`SELECT … FOR UPDATE SKIP LOCKED`), so a ticket survives restarts/deploys and is sent once even with several API tasks. Tune with `REMEDIATION_POLL_SECONDS` / `REMEDIATION_WORKER_ENABLED`.
 - **Guardrail alerts**: every policy/RBAC denial is audited; a spike of `GUARDRAIL_ALERT_THRESHOLD` (default 50)
   denied actions within `GUARDRAIL_ALERT_WINDOW_MINUTES` (default 10) auto-opens a `guardrail` support ticket —
   deduped while one is open — which goes through the same Devin remediation loop, so a misfiring policy or an
@@ -331,4 +332,4 @@ Every infra setting is a Terraform variable — change it in a PR (see [`infra/t
 
 Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
 
-Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data), prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only), and the single-use SSO code store is per-process.
+Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data) and prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only). Redeemed SSO codes are tracked in Postgres (`used_sso_codes`), so single-use holds across API tasks.

@@ -211,6 +211,15 @@ class SupportRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+class UsedSsoCode(Base):
+    """Redeemed one-time SSO codes (by jti), shared by every API process so a code works exactly once."""
+
+    __tablename__ = "used_sso_codes"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class PayoutStatus(str, enum.Enum):
     queued = "queued"  # approved; waiting for the worker to call the provider
     retry_scheduled = "retry_scheduled"  # transient provider error; retried with backoff

@@ -71,7 +71,7 @@ def _maybe_guardrail_alert(db: Session, actor: User | None) -> None:
     if s.guardrail_alert_threshold <= 0:
         return
     since = datetime.now(timezone.utc) - timedelta(minutes=s.guardrail_alert_window_minutes)
-    recent = db.scalars(
+    recent = db.execute(
         select(AuditLog.action, AuditLog.actor_email).where(AuditLog.success.is_(False), AuditLog.created_at >= since)
     ).all()
     if len(recent) < s.guardrail_alert_threshold:
@@ -105,6 +105,6 @@ def _maybe_guardrail_alert(db: Session, actor: User | None) -> None:
     audit(db, None, actor, "guardrail.alert", "support_request", sr.id,
           denied=len(recent), window_minutes=s.guardrail_alert_window_minutes, top_actions=top)
     db.commit()
-    from .remediation import remediate_async  # lazy: remediation imports this module's siblings
+    from .remediation import notify  # lazy: remediation imports this module's siblings
 
-    remediate_async(sr.id)
+    notify()

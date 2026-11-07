@@ -1,16 +1,17 @@
 import secrets
-import threading
 from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .audit import deny
 from .config import get_settings
 from .db import get_db
-from .models import Role, User
+from .models import Role, UsedSsoCode, User
 from .tracing import set_actor
 
 bearer = HTTPBearer(auto_error=False)
@@ -36,21 +37,20 @@ def decode_token(token: str, typ: str = "access") -> dict:
     return payload
 
 
-_used_codes: dict[str, float] = {}
-_used_lock = threading.Lock()
-
-
-def consume_code(payload: dict) -> bool:
-    """Mark a one-time SSO code as used; False if it was already redeemed (single-process store)."""
-    now = datetime.now(timezone.utc).timestamp()
-    with _used_lock:
-        for jti in [j for j, exp in _used_codes.items() if exp < now]:
-            del _used_codes[jti]
-        jti = payload.get("jti")
-        if not jti or jti in _used_codes:
-            return False
-        _used_codes[jti] = float(payload["exp"])
-        return True
+def consume_code(db: Session, payload: dict) -> bool:
+    """Mark a one-time SSO code as used; False if it was already redeemed (by any API process)."""
+    jti = payload.get("jti")
+    if not jti:
+        return False
+    now = datetime.now(timezone.utc)
+    db.execute(delete(UsedSsoCode).where(UsedSsoCode.expires_at < now))
+    db.add(UsedSsoCode(jti=jti, expires_at=datetime.fromtimestamp(payload["exp"], timezone.utc)))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
 
 
 def get_current_user(

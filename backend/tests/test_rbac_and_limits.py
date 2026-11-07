@@ -157,3 +157,22 @@ def test_sso_flow_rejects_foreign_redirect(client, db):
     res = client.post("/auth/sso/authorize", data={"email": JORDAN, "redirect_uri": "https://evil.example.com/"},
                       headers={"X-Forwarded-Host": "evil.example.com", "X-Forwarded-Proto": "https"}, follow_redirects=False)
     assert res.status_code == 400
+
+
+def test_sso_codes_are_tracked_in_the_database(client, db):
+    from datetime import timedelta
+
+    from app.models import UsedSsoCode
+    from app.services import now_utc
+
+    db.add(UsedSsoCode(jti="stale", expires_at=now_utc() - timedelta(minutes=5)))
+    db.commit()
+    res = client.post("/auth/sso/mfa", data={"email": JORDAN, "redirect_uri": "http://localhost:8080/", "code": "123456"},
+                      follow_redirects=False)
+    code = res.headers["location"].split("code=")[1]
+    assert client.post("/auth/token", json={"code": code}).status_code == 200
+    db.expire_all()
+    assert [c.jti for c in db.query(UsedSsoCode)] != ["stale"]  # expired entries are purged
+    assert db.query(UsedSsoCode).count() == 1
+    # Shared store: every API process sees the redemption, not just the one that handled it.
+    assert client.post("/auth/token", json={"code": code}).status_code == 401
