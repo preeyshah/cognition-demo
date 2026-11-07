@@ -5,6 +5,8 @@ from urllib.parse import quote
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEMO_WEBHOOK_SECRET = "whsec_demo_only"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -41,10 +43,25 @@ class Settings(BaseSettings):
     devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
     remediation_cooldown_minutes: int = 60
+    remediation_worker_enabled: bool = True  # drains queued tickets to Devin
+    remediation_poll_seconds: float = 10.0
 
     history_provider_url: str = "http://localhost:9000"
     history_provider_api_key: str = "demo-provider-key"
     history_provider_timeout_s: float = 3.0
+
+    # Payments provider (PayCore) used to actually move the money once a refund is approved.
+    payments_provider_url: str = "http://localhost:9000"
+    payments_provider_api_key: str = "demo-provider-key"
+    payments_webhook_secret: str = DEMO_WEBHOOK_SECRET  # shared with the provider; set from a secret store
+    payments_webhook_tolerance_s: int = 300  # reject stale/replayed webhook signatures
+    payments_timeout_s: float = 5.0
+    payments_sandbox_controls: bool = True  # admin UI can inject provider failures (sandbox only)
+    payout_max_attempts: int = 5
+    payout_retry_base_s: float = 2.0
+    payout_retry_max_s: float = 60.0
+    payout_worker_enabled: bool = True
+    payout_worker_interval_s: float = 2.0
 
     # Dev-only mock second factor on the SSO picker; ignored when ENVIRONMENT=prod.
     mock_mfa_code: str = "123456"
@@ -79,6 +96,11 @@ class Settings(BaseSettings):
         # Demo data (users, customers, refunds) must never appear in prod unless explicitly requested.
         if self.environment == "prod" and "seed_on_startup" not in self.model_fields_set:
             self.seed_on_startup = False
+        # Provider failure injection is a sandbox demo tool; never expose it in prod by default.
+        if self.environment == "prod" and self.payments_webhook_secret == DEMO_WEBHOOK_SECRET:
+            raise ValueError("PAYMENTS_WEBHOOK_SECRET must be set when ENVIRONMENT=prod")
+        if self.environment == "prod" and "payments_sandbox_controls" not in self.model_fields_set:
+            self.payments_sandbox_controls = False
         return self
 
     @property

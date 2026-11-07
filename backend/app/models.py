@@ -114,6 +114,7 @@ class RefundRequest(Base):
     assigned_to: Mapped[User | None] = relationship(foreign_keys=[assigned_to_id], lazy="joined")
     decided_by: Mapped[User | None] = relationship(foreign_keys=[decided_by_id], lazy="joined")
     escalated_by: Mapped[User | None] = relationship(foreign_keys=[escalated_by_id], lazy="joined")
+    payout: Mapped["Payout | None"] = relationship(back_populates="refund", lazy="selectin", uselist=False)
 
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="ck_refund_amount_positive"),
@@ -245,3 +246,73 @@ class DataSubjectRequest(Base):
     result: Mapped[dict] = mapped_column(JsonType, default=dict)
 
     customer: Mapped[Customer] = relationship(lazy="joined")
+
+
+class UsedSsoCode(Base):
+    """Redeemed one-time SSO codes (by jti), shared by every API process so a code works exactly once."""
+
+    __tablename__ = "used_sso_codes"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PayoutStatus(str, enum.Enum):
+    queued = "queued"  # approved; waiting for the worker to call the provider
+    retry_scheduled = "retry_scheduled"  # transient provider error; retried with backoff
+    processing = "processing"  # accepted by the provider, waiting for the settlement webhook
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class Payout(Base):
+    """The money movement for an approved refund at the payments provider (one per refund).
+
+    Written in the same transaction as the approval (transactional outbox), then driven by the
+    payout worker, provider webhooks and reconciliation."""
+
+    __tablename__ = "payouts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    refund_id: Mapped[int] = mapped_column(ForeignKey("refund_requests.id"), unique=True)
+    provider: Mapped[str] = mapped_column(String(32), default="paycore")
+    idempotency_key: Mapped[str] = mapped_column(String(80), unique=True)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[PayoutStatus] = mapped_column(
+        Enum(PayoutStatus, name="payout_status"), default=PayoutStatus.queued, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    manual_retries: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    refund: Mapped[RefundRequest] = relationship(back_populates="payout", lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="ck_payout_amount_positive"),
+        CheckConstraint("attempts >= 0", name="ck_payout_attempts_nonneg"),
+    )
+
+
+class ProviderWebhookEvent(Base):
+    """Every signature-verified provider webhook, keyed by event id so redeliveries are no-ops."""
+
+    __tablename__ = "provider_webhook_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), default="paycore")
+    event_id: Mapped[str] = mapped_column(String(64), unique=True)
+    event_type: Mapped[str] = mapped_column(String(64))
+    provider_refund_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    outcome: Mapped[str] = mapped_column(String(32))  # applied | ignored_stale | unknown_refund
+    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

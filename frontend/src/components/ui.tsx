@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 
-import type { StatCardData } from '../api'
+import type { Payout, StatCardData } from '../api'
 import { formatValue, humanize } from '../format'
 
 export const Spinner = () => <div className="spinner" />
@@ -22,6 +22,18 @@ export function StatGrid({ cards }: { cards: StatCardData[] }) {
 
 export const Badge = ({ kind, children }: { kind: string; children: ReactNode }) => <span className={`badge b-${kind}`}>{children}</span>
 export const StatusBadge = ({ status }: { status: string }) => <Badge kind={status}>{status}</Badge>
+const PAYOUT_LABEL: Record<Payout['status'], [string, string]> = {
+  queued: ['muted', 'payout queued'],
+  retry_scheduled: ['warning', 'payout retrying'],
+  processing: ['pending', 'payout processing'],
+  succeeded: ['success', 'paid out'],
+  failed: ['danger', 'payout failed'],
+}
+export const PayoutBadge = ({ payout }: { payout: Payout | null | undefined }) => {
+  if (!payout) return null
+  const [kind, label] = PAYOUT_LABEL[payout.status]
+  return <Badge kind={kind}>{label}</Badge>
+}
 export const RoleBadge = ({ role }: { role: string }) => <Badge kind={role}>{role}</Badge>
 export const RiskBadge = ({ score }: { score: number }) => (
   <Badge kind={score >= 70 ? 'danger' : score >= 40 ? 'warning' : 'success'}>risk {score}</Badge>

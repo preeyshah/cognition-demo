@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import remediation
 from ..audit import audit
+from ..config import get_settings
 from ..db import get_db
 from ..models import RefundRequest, RequestTrace, Role, SupportRequest, User
 from ..security import get_current_user, require_roles
@@ -83,6 +84,14 @@ def create_support_request(
     return _support_out(sr)
 
 
+@router.get("/admin/support/config")
+def support_config(_: User = Depends(admin_only)):
+    """Whether tickets are handed to Devin, and where its PRs go (no secrets)."""
+    s = get_settings()
+    return {"devin_enabled": remediation.enabled(), "auto_remediate_errors": s.auto_remediate_errors,
+            "repo": s.devin_repo, "base_branch": s.devin_base_branch, "max_acu": s.devin_max_acu}
+
+
 @router.get("/admin/support/requests")
 def list_support_requests(
     status: str | None = None, _: User = Depends(admin_only), db: Session = Depends(get_db)
@@ -106,5 +115,5 @@ def remediate_support_request(
     sr.status = "queued"
     audit(db, request, user, "support.remediate", "support_request", sr.id)
     db.commit()
-    remediation.remediate_async(sr.id)
+    remediation.notify()
     return _support_out(sr)

@@ -111,7 +111,7 @@ def remediate_control(control_id: str, request: Request, actor: User = Depends(a
               devin=remediation.enabled())
         db.commit()
         if remediation.enabled():
-            remediation.remediate_async(sr.id)
+            remediation.notify()
     return {"id": sr.id, "status": sr.status, "devin_enabled": remediation.enabled(),
             "devin_session_url": sr.devin_session_url, "title": sr.title}
 

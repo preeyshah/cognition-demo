@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import RefundReason, RefundStatus, Role
+from .models import PayoutStatus, RefundReason, RefundStatus, Role
 
 
 class UserOut(BaseModel):
@@ -43,6 +43,27 @@ class Permissions(BaseModel):
     escalate_blocked_reasons: list[str] = []
 
 
+class PayoutOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    provider: str
+    status: PayoutStatus
+    amount_cents: int
+    currency: str
+    provider_refund_id: str | None
+    idempotency_key: str
+    attempts: int
+    manual_retries: int
+    next_attempt_at: datetime | None
+    last_http_status: int | None
+    last_error: str | None
+    failure_code: str | None
+    succeeded_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class RefundOut(BaseModel):
     id: int
     reference: str
@@ -65,6 +86,7 @@ class RefundOut(BaseModel):
     overdue: bool
     created_at: datetime
     permissions: Permissions
+    payout: PayoutOut | None = None
 
 
 class RefundEventOut(BaseModel):
@@ -104,6 +126,11 @@ class RefundCreateIn(BaseModel):
     description: str = Field(default="", max_length=2000)
     risk_score: int = Field(default=0, ge=0, le=100)
     requested_by_email: str
+
+
+class SandboxIn(BaseModel):
+    mode: Literal["outage", "decline", "async_fail", "lost_response", "drop_webhook"]
+    count: int = Field(default=1, ge=0, le=20)
 
 
 class UserCreateIn(BaseModel):

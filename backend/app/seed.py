@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from .models import (
     Customer,
     DataSubjectRequest,
+    Payout,
+    PayoutStatus,
     PolicySetting,
     RefundEvent,
     RefundReason,
@@ -137,6 +139,13 @@ def seed(db: Session) -> None:
             events.append((r.status.value, admin.id, "escalated", r.status.value, r.decision_note, t))
         db.add(r)
         db.flush()
+        if r.status == RefundStatus.approved:
+            paid_at = min(t + timedelta(minutes=2 + r.id % 25), now - timedelta(minutes=1))  # keep rng sequence stable
+            db.add(Payout(refund_id=r.id, idempotency_key=f"refund-{r.reference}", provider_refund_id=f"re_seed{r.id:05d}",
+                          amount_cents=amount, currency="USD", status=PayoutStatus.succeeded, attempts=1,
+                          last_http_status=201, succeeded_at=paid_at, created_at=t, updated_at=paid_at))
+            events.append(("payout_succeeded", None, r.status.value, r.status.value,
+                           "Money returned to customer (confirmed by webhook)", paid_at))
         for etype, actor, frm, to, note, ts in events:
             db.add(RefundEvent(refund_id=r.id, actor_id=actor, event_type=etype, from_status=frm, to_status=to,
                                note=note, data={"amount_cents": amount}, created_at=ts))
@@ -165,6 +174,16 @@ def seed(db: Session) -> None:
     for hours, amount, risk in [(2, 42_000, 84), (9, 18_500, 77), (14, 380_000, 35), (26, 615_000, 52)]:
         make(now - timedelta(hours=hours), rng.choice(customers), amount, risk, rng.choice(list(RefundReason)), force_open=True)
     seed_compliance_findings(db)
+    # One payout the provider bounced after accepting it, so the Payouts page has something to re-drive.
+    db.flush()
+    failed = db.scalars(select(Payout).order_by(Payout.succeeded_at.desc()).limit(1)).first()
+    if failed:
+        failed.status, failed.succeeded_at = PayoutStatus.failed, None
+        failed.failure_code, failed.last_error = "account_closed", "Refund failed at provider after it was accepted"
+        db.query(RefundEvent).filter_by(refund_id=failed.refund_id, event_type="payout_succeeded").delete()
+        db.add(RefundEvent(refund_id=failed.refund_id, event_type="payout_failed", from_status="approved",
+                           to_status="approved", note="Payout failed: account_closed — customer's account is closed",
+                           data={"failure_code": "account_closed"}, created_at=failed.updated_at))
     db.commit()
 
 
