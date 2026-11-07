@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     db_name: str = "refunds"
     db_user: str = ""
     db_password: str = ""
+    db_sslmode: str = "require"
 
     # Self-healing: hand errors / support requests to Devin, which opens a PR on this repo.
     devin_api_url: str = "https://api.devin.ai"
@@ -47,10 +48,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _database_url_from_parts(self):
-        if self.db_host:
+        explicit_url = "database_url" in self.model_fields_set and self.database_url
+        if self.db_host and not explicit_url:
             self.database_url = (
                 f"postgresql+psycopg://{quote(self.db_user, safe='')}:{quote(self.db_password, safe='')}"
-                f"@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}?sslmode={self.db_sslmode}"
             )
         return self
 

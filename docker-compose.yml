@@ -30,7 +30,11 @@ services:
       provider:
         condition: service_started
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@db:5432/refunds}  # set to use any external Postgres
+      DATABASE_URL: ${DATABASE_URL:-}  # set to use any external Postgres; otherwise built (URL-quoted) from DB_*
+      DB_HOST: db
+      DB_USER: refunds
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-refunds}
+      DB_SSLMODE: disable  # private Compose network
       JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
@@ -40,6 +44,7 @@ services:
       DEVIN_API_KEY: ${DEVIN_API_KEY:-}  # blank => self-healing loop records tickets but doesn't call Devin
       DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
       DEVIN_BASE_BRANCH: ${DEVIN_BASE_BRANCH:-main}
+      DEVIN_MAX_ACU: ${DEVIN_MAX_ACU:-10}
     ports:
       - "8000:8000"
 
