@@ -28,7 +28,7 @@ services:
       provider:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@db:5432/refunds
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://refunds:refunds@db:5432/refunds}  # set to use any external Postgres
       JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}

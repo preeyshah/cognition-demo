@@ -122,6 +122,18 @@ cd frontend && npm run build   # type-check + production build
 - Use Alembic migrations instead of `create_all` once the schema stabilises.
 - The same pattern (policy module + audit log + role-aware React screens) is a template for the KYC review queue and feature-flag admin panel.
 
+## One-command setup (any Postgres)
+
+```bash
+./setup.sh local                               # Docker: Postgres 16 + API + provider + UI on this machine
+./setup.sh external 'postgres://u:p@host/db'   # any hosted Postgres: Neon, Supabase, RDS/Aurora, Cloud SQL, Azure
+./setup.sh dev [url]                           # no app containers: venv + uvicorn + Vite
+./setup.sh aws                                 # Terraform: VPC, WAF, RDS, ECS, CloudFront (needs AWS creds)
+./setup.sh inspect [url]                       # list tables, row counts and BI views in the database
+```
+
+The app only needs a `DATABASE_URL` (or `DB_HOST`/`DB_USER`/`DB_PASSWORD`). It creates the schema, BI views and audit trigger, and seeds demo data on first start.
+
 ## Monitoring & tracing
 
 Every API request gets a unique, server-generated trace id (`tr_<uuid>`; a client-sent `X-Trace-Id` / `X-Request-ID` is only kept as `client_ref` so callers cannot merge traces). It is:
