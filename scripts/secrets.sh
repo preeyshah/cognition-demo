@@ -93,7 +93,13 @@ _rc_push() {
   unset _RC_SRC_DEVIN_API_KEY; _rc_load_local
   [[ -n "${DEVIN_API_KEY:-}" ]] || { _rc_log "no DEVIN_API_KEY to push"; return 1; }
   # Key and org id share the secret the ECS task reads (infra/compute.tf), so both reach the API.
-  python3 -c 'import json,os;print(json.dumps({k:os.environ.get(k,"") for k in ("DEVIN_API_KEY","DEVIN_ORG_ID")}),end="")' \
+  # Merge: only overwrite values present locally, so a key-only push keeps the stored DEVIN_ORG_ID.
+  { aws secretsmanager get-secret-value --secret-id "$_rc_name/devin-api-key" --query SecretString --output text 2>/dev/null || echo '{}'; } \
+    | python3 -c 'import json,os,sys
+cur=json.loads(sys.stdin.read() or "{}")
+cur.update({k:os.environ[k] for k in ("DEVIN_API_KEY","DEVIN_ORG_ID") if os.environ.get(k)})
+cur.setdefault("DEVIN_ORG_ID","")
+print(json.dumps(cur),end="")' \
     | aws secretsmanager put-secret-value --secret-id "$_rc_name/devin-api-key" --secret-string file:///dev/stdin >/dev/null
   _rc_log "DEVIN_API_KEY + DEVIN_ORG_ID -> $_rc_name/devin-api-key"
   _rc_log "ECS reads secrets at task start: aws ecs update-service --cluster $_rc_name --service api --force-new-deployment"
