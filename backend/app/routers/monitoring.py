@@ -86,7 +86,7 @@ def create_support_request(
         sr.status = "queued"
     db.commit()
     if auto:
-        remediation.remediate_async(sr.id)
+        remediation.notify()
     return _support_out(sr)
 
 
@@ -121,5 +121,5 @@ def remediate_support_request(
     sr.status = "queued"
     audit(db, request, user, "support.remediate", "support_request", sr.id)
     db.commit()
-    remediation.remediate_async(sr.id)
+    remediation.notify()
     return _support_out(sr)

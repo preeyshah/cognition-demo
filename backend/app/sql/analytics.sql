@@ -35,6 +35,10 @@ CREATE OR REPLACE VIEW v_denied_actions AS
 SELECT created_at, actor_email, action, entity_type, entity_id, detail->>'reason' AS reason, ip_address
 FROM audit_log WHERE success = false;
 
+-- Hash-chain columns for databases created before the Compliance Center (create_all does not alter tables).
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS prev_hash varchar(64);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS row_hash varchar(64);
+
 -- The audit log is append-only, enforced in the database itself.
 CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger AS $$
 BEGIN

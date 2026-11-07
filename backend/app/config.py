@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     auto_remediate_errors: bool = True
     auto_remediate_requests: bool = True  # UI feature/problem submissions go straight to Devin
     remediation_cooldown_minutes: int = 60
+    remediation_worker_enabled: bool = True  # drains queued tickets to Devin
+    remediation_poll_seconds: float = 10.0
 
     history_provider_url: str = "http://localhost:9000"
     history_provider_api_key: str = "demo-provider-key"
@@ -69,6 +71,13 @@ class Settings(BaseSettings):
     # support ticket that the remediation loop hands to Devin. 0 disables the alert.
     guardrail_alert_threshold: int = 50
     guardrail_alert_window_minutes: int = 10
+
+    # Compliance Center thresholds (see app/compliance.py for the framework mapping).
+    audit_retention_days: int = 400  # PCI DSS 10.5.1: >= 12 months
+    access_review_interval_days: int = 90  # quarterly; PCI DSS 7.2.4 requires at least every 6 months
+    dormant_account_days: int = 90  # PCI DSS 8.2.6
+    dsar_due_days: int = 30  # GDPR Art. 12(3): one month
+    session_idle_limit_minutes: int = 15  # PCI DSS 8.2.8
 
     seed_on_startup: bool = True
 
