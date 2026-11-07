@@ -145,3 +145,8 @@ def test_sso_flow_rejects_foreign_redirect(client, db):
     assert tok.status_code == 200 and tok.json()["user"]["role"] == "reviewer"
     # An SSO code is not an access token.
     assert client.get("/auth/me", headers={"Authorization": f"Bearer {code}"}).status_code == 401
+    # Codes are single-use, and forwarded headers can't widen the redirect allow-list.
+    assert client.post("/auth/token", json={"code": code}).status_code == 401
+    res = client.post("/auth/sso/authorize", data={"email": JORDAN, "redirect_uri": "https://evil.example.com/"},
+                      headers={"X-Forwarded-Host": "evil.example.com", "X-Forwarded-Proto": "https"}, follow_redirects=False)
+    assert res.status_code == 400

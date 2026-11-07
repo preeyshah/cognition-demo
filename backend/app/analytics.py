@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import policy
 from .models import Customer, RefundRequest, RefundStatus, Role, User
-from .services import aware, get_policies, now_utc, start_of_day
+from .services import aware, now_utc, start_of_day
 
 
 def _hours(r: RefundRequest) -> float | None:
@@ -69,7 +69,6 @@ def summary_for(db: Session, user: User) -> dict:
             },
         }
 
-    rows = db.scalars(select(RefundRequest).where(RefundRequest.created_at >= now - timedelta(days=90))).unique().all()
     open_rows = db.scalars(select(RefundRequest).where(RefundRequest.status.in_(open_statuses))).unique().all()
     pending = [r for r in open_rows if r.status == RefundStatus.pending]
     escalated = [r for r in open_rows if r.status == RefundStatus.escalated]
@@ -96,7 +95,6 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
     now = now_utc()
     since = now - timedelta(days=days)
     show_pii = policy.can_view_pii(user)
-    policies = get_policies(db)
     rows = db.scalars(select(RefundRequest).where(RefundRequest.created_at >= since)).unique().all()
     decided = [r for r in rows if r.decided_at]
     approved = [r for r in rows if r.status == RefundStatus.approved]
