@@ -63,6 +63,7 @@ cmd_up() {
   git ls-remote --exit-code -q origin "refs/heads/$BRANCH" >/dev/null || die "origin/$BRANCH missing: run scripts/demo.sh reset"
   worktree_at "origin/$BRANCH" "$BRANCH"
   source scripts/secrets.sh
+  unset DATABASE_URL POSTGRES_PASSWORD  # mock SSO is on: never point the demo at a real database
   [[ -n "${DEVIN_API_KEY:-}" ]] || log "DEVIN_API_KEY not set: tickets will be recorded but not sent to Devin"
   export DEVIN_BASE_BRANCH="$BRANCH" JWT_SECRET="${JWT_SECRET:-demo-$(date +%s)-$RANDOM}"
   (cd "$WT" && docker compose -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1 || true
