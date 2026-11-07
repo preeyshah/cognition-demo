@@ -121,3 +121,21 @@ def test_admin_remediate_queues_ticket_for_worker(client, db, monkeypatch):
     db.expire_all()
     sr = db.get(SupportRequest, sr_id)
     assert sr.status == "remediation_failed" and "503" in sr.remediation_error
+
+
+def test_guardrail_alert_is_queued_for_the_worker(client, db, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "guardrail_alert_threshold", 1)
+    viewer = user(db, "vik.auditor@acmepay.com")
+    r = make_refund(db, user(db, JORDAN))
+    assert client.post(f"/refunds/{r.id}/approve", headers=auth(viewer), json={}).status_code == 403
+    db.expire_all()
+    sr = db.query(SupportRequest).filter_by(kind="guardrail").one()
+    assert sr.status == "queued"
+
+    monkeypatch.setattr(remediation, "enabled", lambda: True)
+    monkeypatch.setattr(remediation, "start_devin_session", lambda prompt, title: {"session_id": "devin-g"})
+    assert remediation.process_queue() == 1
+    db.expire_all()
+    assert db.get(SupportRequest, sr.id).status == "devin_working"
