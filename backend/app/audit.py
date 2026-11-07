@@ -71,7 +71,7 @@ def _maybe_guardrail_alert(db: Session, actor: User | None) -> None:
     if s.guardrail_alert_threshold <= 0:
         return
     since = datetime.now(timezone.utc) - timedelta(minutes=s.guardrail_alert_window_minutes)
-    recent = db.scalars(
+    recent = db.execute(
         select(AuditLog.action, AuditLog.actor_email).where(AuditLog.success.is_(False), AuditLog.created_at >= since)
     ).all()
     if len(recent) < s.guardrail_alert_threshold:
