@@ -19,7 +19,8 @@ normalize_url() {
   local u="$1"
   u="${u/#postgres:\/\//postgresql+psycopg://}"
   u="${u/#postgresql:\/\//postgresql+psycopg://}"
-  if [[ "$u" != *localhost* && "$u" != *127.0.0.1* && "$u" != *@db:* && "$u" != *sslmode=* ]]; then
+  local host="${u#*://}"; host="${host##*@}"; host="${host%%[:/?]*}"
+  if [[ "$host" != localhost && "$host" != 127.0.0.1 && "$host" != db && "$u" != *sslmode=* ]]; then
     [[ "$u" == *\?* ]] && u="$u&sslmode=require" || u="$u?sslmode=require"
   fi
   printf '%s' "$u"
@@ -77,10 +78,8 @@ case "$cmd" in
     url="${1:-}"
     if [[ -z "$url" ]]; then
       need docker "or pass a Postgres URL"
-      url="postgresql+psycopg://refunds:refunds@localhost:5433/refunds"
-      docker run -d --name refunds-dev-pg -e POSTGRES_USER=refunds -e POSTGRES_PASSWORD=refunds -e POSTGRES_DB=refunds \
-        -p 5433:5432 postgres:16-alpine >/dev/null 2>&1 || docker start refunds-dev-pg >/dev/null
-      sleep 3
+      docker compose up -d --wait db  # same database that `./setup.sh inspect` reads
+      url="postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@localhost:${DB_PORT:-5433}/refunds"
     else
       url="$(normalize_url "$url")"
     fi
@@ -100,20 +99,25 @@ case "$cmd" in
     log "Bootstrapping Terraform state + GitHub OIDC deploy role"
     (cd infra/bootstrap && terraform init -input=false && terraform apply -input=false -auto-approve -var region="$region")
     bucket=$(terraform -chdir=infra/bootstrap output -raw state_bucket)
-    if command -v gh >/dev/null; then
+    if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
       gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap output -raw deploy_role_arn)"
       gh variable set TF_STATE_BUCKET --body "$bucket"; gh variable set AWS_REGION --body "$region"
       log "GitHub variables set: every push to main now deploys automatically"
+    else
+      log "gh not installed/authenticated: set repo variables AWS_DEPLOY_ROLE_ARN, TF_STATE_BUCKET, AWS_REGION manually"
     fi
     log "Running the first deploy (same steps as .github/workflows/deploy.yml)"
     (cd infra && terraform init -input=false -backend-config="bucket=$bucket" -backend-config="region=$region" \
       && terraform apply -input=false -auto-approve -var region="$region" -target=aws_ecr_repository.backend)
     repo=$(terraform -chdir=infra output -raw ecr_repository_url); tag=$(git rev-parse HEAD)
     aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "${repo%%/*}"
-    docker build -t "$repo:$tag" backend && docker push "$repo:$tag"
+    if ! aws ecr describe-images --region "$region" --repository-name "${repo#*/}" --image-ids imageTag="$tag" >/dev/null 2>&1; then
+      docker build -t "$repo:$tag" backend && docker push "$repo:$tag"  # tags are immutable; skip on re-runs
+    fi
     (cd infra && terraform apply -input=false -auto-approve -var region="$region" -var image_tag="$tag")
     (cd frontend && npm ci --silent && npm run build \
-      && aws s3 sync dist "s3://$(terraform -chdir=../infra output -raw frontend_bucket)" --delete)
+      && aws s3 sync dist "s3://$(terraform -chdir=../infra output -raw frontend_bucket)" --delete \
+      && aws cloudfront create-invalidation --distribution-id "$(terraform -chdir=../infra output -raw cloudfront_distribution_id)" --paths '/*' >/dev/null)
     log "Ready: $(terraform -chdir=infra output -raw app_url)"
     ;;
   inspect)
