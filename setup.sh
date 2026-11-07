@@ -22,7 +22,7 @@ load_dotenv
 # DEVIN_API_KEY etc.: env > AWS Secrets Manager > ~/.config/refunds-console (see scripts/secrets.sh)
 [[ "${1:-}" == down ]] || source scripts/secrets.sh
 pg_pw() {  # URL-encode the DB password in pure bash (local/down must work without Python)
-  local s="${POSTGRES_PASSWORD:-refunds}" o="" c i
+  local LC_ALL=C s="${POSTGRES_PASSWORD:-refunds}" o="" c i  # LC_ALL=C: iterate UTF-8 bytes
   for ((i = 0; i < ${#s}; i++)); do
     c="${s:i:1}"
     case "$c" in [a-zA-Z0-9.~_-]) o+="$c" ;; *) printf -v c '%%%02X' "'$c"; o+="$c" ;; esac
