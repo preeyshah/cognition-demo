@@ -121,3 +121,60 @@ cd frontend && npm run build   # type-check + production build
 - Replace `mock_provider` with the real vendor URL/key via `HISTORY_PROVIDER_URL` / `HISTORY_PROVIDER_API_KEY` (store as secrets).
 - Use Alembic migrations instead of `create_all` once the schema stabilises.
 - The same pattern (policy module + audit log + role-aware React screens) is a template for the KYC review queue and feature-flag admin panel.
+
+## Monitoring & tracing
+
+Every API request gets a unique trace id (`tr_<uuid>`; a well-formed incoming `X-Trace-Id` / `X-Request-ID` is honoured). It is:
+
+- returned on every response as `X-Trace-Id` (also in the body of 500s, and shown in UI error messages),
+- stored in `request_traces` (method, path, status, latency, actor, error + stack),
+- stamped on every `audit_log` row, every `refund_events` row and `refund_requests.created_trace_id`,
+- included in every structured JSON log line (stdout → CloudWatch Logs on AWS; a saved Logs Insights query `refunds-console/trace-lookup` is provisioned).
+
+Look a trace up (admin only):
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/admin/traces/tr_…        # request + audit + refund events + created rows
+curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=true"
+```
+
+## Self-healing loop (Devin)
+
+- Any user can file `POST /support/requests {title, description, trace_id}`.
+- Every unhandled exception automatically opens an `error` ticket (deduped by exception fingerprint for `REMEDIATION_COOLDOWN_MINUTES`).
+- With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `main`. The session URL is stored on the ticket (`GET /admin/support/requests`).
+- Without the key, tickets are still recorded; nothing is sent anywhere.
+
+## CI/CD
+
+- `.github/workflows/ci.yml` (every PR and push): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
+- `.github/workflows/deploy.yml` (push to `main`): reruns CI, then via GitHub OIDC (no stored AWS keys) builds/pushes the image to ECR, `terraform apply`s with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`. Skipped until the repo variable `AWS_DEPLOY_ROLE_ARN` is set.
+
+## AWS infrastructure (`infra/`, Terraform)
+
+```text
+Browser ──HTTPS──> CloudFront (+ AWS WAF: IP reputation, OWASP common, bad inputs, SQLi, per-IP + SSO rate limits)
+                    ├── /*     -> S3 (private, OAC only)                      React SPA
+                    └── /api/* -> ALB (SG: CloudFront prefix list only, secret origin header, else 403)
+                                 └── ECS Fargate "api" (private subnets, non-root, read-only FS)
+                                      ├── RDS Postgres 16 (DB subnets, no public IP, KMS, force SSL, backups, deletion protection)
+                                      └── ECS "provider" (mock PayCore, reachable only from api via Cloud Map)
+Secrets Manager (KMS): RDS-managed DB password, JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
+```
+
+Same-origin SPA + API means the browser never makes cross-origin calls; CORS and the SSO redirect allow-list are pinned to the CloudFront origin. `TRUSTED_PROXY_HOPS=2` makes audit IPs come from the CloudFront/ALB-appended `X-Forwarded-For` entry, not client-supplied values.
+
+One-time setup (admin credentials, dedicated AWS account):
+
+```bash
+cd infra/bootstrap && terraform init && terraform apply          # state bucket, lock table, GitHub OIDC deploy role
+gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform output -raw deploy_role_arn)"
+gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
+gh variable set AWS_REGION        --body us-east-1
+# optional self-healing: gh variable set DEVIN_ORG_ID ...; after first deploy:
+# aws secretsmanager put-secret-value --secret-id refunds-console/devin-api-key --secret-string "$DEVIN_API_KEY"
+```
+
+Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
+
+Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data), the SSO is a mock (swap for Okta/Entra OIDC), and the single-use SSO code store is per-process.

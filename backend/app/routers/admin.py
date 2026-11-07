@@ -115,7 +115,7 @@ def audit_log(
     return [
         {"id": a.id, "created_at": a.created_at, "actor_email": a.actor_email, "action": a.action,
          "entity_type": a.entity_type, "entity_id": a.entity_id, "success": a.success,
-         "ip_address": a.ip_address, "detail": a.detail}
+         "ip_address": a.ip_address, "detail": a.detail, "trace_id": a.trace_id}
         for a in db.scalars(q)
     ]
 

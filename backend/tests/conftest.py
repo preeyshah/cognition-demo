@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.db import Base, SessionLocal, engine
 from app.main import app
-from app.models import Customer, RefundReason, RefundRequest, RefundStatus, Role, User
+from app.models import Customer, RefundReason, RefundRequest, RefundStatus, User
 from app.security import create_token
 from app.seed import seed
 from app.services import now_utc

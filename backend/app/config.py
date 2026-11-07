@@ -1,7 +1,8 @@
 import secrets
 from functools import lru_cache
+from urllib.parse import quote
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://refunds:refunds@localhost:5432/refunds"
-    jwt_secret: str = "dev-only-change-me"
+    jwt_secret: str = ""  # unset => random per process (tokens die on restart)
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60 * 8
 
@@ -17,13 +18,39 @@ class Settings(BaseSettings):
     allowed_redirect_origins: str = (
         "http://localhost:8080,http://localhost:5173"
     )
-    cors_origins: str = "*"
+    cors_origins: str = "http://localhost:8080,http://localhost:5173"
+    log_level: str = "INFO"
+    trusted_proxy_hops: int = 0
+
+    # On AWS the DB password is injected from Secrets Manager; DATABASE_URL is assembled from parts.
+    db_host: str = ""
+    db_port: int = 5432
+    db_name: str = "refunds"
+    db_user: str = ""
+    db_password: str = ""
+
+    # Self-healing: hand errors / support requests to Devin, which opens a PR on this repo.
+    devin_api_url: str = "https://api.devin.ai"
+    devin_api_key: str = ""
+    devin_org_id: str = ""
+    devin_repo: str = "preeyshah/cognition-demo"
+    auto_remediate_errors: bool = True
+    remediation_cooldown_minutes: int = 60
 
     history_provider_url: str = "http://localhost:9000"
     history_provider_api_key: str = "demo-provider-key"
     history_provider_timeout_s: float = 3.0
 
     seed_on_startup: bool = True
+
+    @model_validator(mode="after")
+    def _database_url_from_parts(self):
+        if self.db_host:
+            self.database_url = (
+                f"postgresql+psycopg://{quote(self.db_user, safe='')}:{quote(self.db_password, safe='')}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require"
+            )
+        return self
 
     @field_validator("jwt_secret")
     @classmethod

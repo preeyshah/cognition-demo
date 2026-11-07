@@ -83,9 +83,12 @@ export const setToken = (t: string | null) => (t ? localStorage.setItem(KEY, t) 
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
-    super(message)
+  traceId: string | null
+  constructor(status: number, message: string, traceId: string | null = null) {
+    // The trace id lets support/admins pull up exactly what happened (GET /admin/traces/{id}).
+    super(traceId ? `${message} (trace ${traceId})` : message)
     this.status = status
+    this.traceId = traceId
   }
 }
 
@@ -111,7 +114,7 @@ async function request(path: string, method = 'GET', body?: unknown): Promise<Re
     } catch {
       /* not json */
     }
-    throw new ApiError(res.status, msg)
+    throw new ApiError(res.status, msg, res.headers.get('X-Trace-Id'))
   }
   return res
 }

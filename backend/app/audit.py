@@ -1,15 +1,19 @@
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
+from .config import get_settings
 from .models import AuditLog, User
 
 
 def client_ip(request: Request | None) -> str | None:
     if request is None:
         return None
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # Only trust X-Forwarded-For entries appended by our own proxies (nginx locally; CloudFront + ALB on AWS):
+    # the client IP is the entry `trusted_proxy_hops` from the right, anything left of it is client-controlled.
+    hops = get_settings().trusted_proxy_hops
+    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    if hops and len(fwd) >= hops:
+        return fwd[-hops]
     return request.client.host if request.client else None
 
 

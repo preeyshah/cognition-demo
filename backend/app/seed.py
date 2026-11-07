@@ -144,7 +144,7 @@ def seed(db: Session) -> None:
 
     # Guarantee each reviewer an interesting open queue for the demo.
     for reviewer in reviewers:
-        for j in range(6):
+        for _ in range(6):
             created = now - timedelta(hours=rng.uniform(1, 30))
             amount = rng.randint(2_000, reviewer.approval_limit_cents)
             make(created, rng.choice(customers), amount, rng.randint(5, 60), rng.choice(list(RefundReason)), reviewer, True)

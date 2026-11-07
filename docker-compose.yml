@@ -33,6 +33,10 @@ services:
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
       ALLOWED_REDIRECT_ORIGINS: http://localhost:8080,http://localhost:5173
+      CORS_ORIGINS: http://localhost:8080,http://localhost:5173
+      TRUSTED_PROXY_HOPS: "1"  # nginx
+      DEVIN_API_KEY: ${DEVIN_API_KEY:-}  # blank => self-healing loop records tickets but doesn't call Devin
+      DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
     ports:
       - "8000:8000"
 

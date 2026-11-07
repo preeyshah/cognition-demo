@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -17,6 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+from .tracing import current_trace_id
 
 JsonType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -84,6 +86,7 @@ class RefundRequest(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     reference: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    created_trace_id: Mapped[str | None] = mapped_column(String(64), index=True, default=current_trace_id)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     order_id: Mapped[str] = mapped_column(String(64))
     amount_cents: Mapped[int] = mapped_column(Integer)
@@ -132,6 +135,7 @@ class RefundEvent(Base):
     to_status: Mapped[str | None] = mapped_column(String(16))
     note: Mapped[str | None] = mapped_column(Text)
     data: Mapped[dict] = mapped_column(JsonType, default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True, default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     actor: Mapped[User | None] = relationship(lazy="joined")
@@ -151,6 +155,7 @@ class AuditLog(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     ip_address: Mapped[str | None] = mapped_column(String(64))
     detail: Mapped[dict] = mapped_column(JsonType, default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True, default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
@@ -166,3 +171,40 @@ class PolicySetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class RequestTrace(Base):
+    """One row per API request, keyed by the trace id returned in X-Trace-Id."""
+
+    __tablename__ = "request_traces"
+
+    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    method: Mapped[str] = mapped_column(String(8))
+    path: Mapped[str] = mapped_column(String(255), index=True)
+    query: Mapped[str | None] = mapped_column(String(1000))
+    status_code: Mapped[int] = mapped_column(Integer, index=True)
+    duration_ms: Mapped[float] = mapped_column(Float)
+    actor_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    actor_email: Mapped[str | None] = mapped_column(String(255))
+    error: Mapped[dict | None] = mapped_column(JsonType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class SupportRequest(Base):
+    """User-reported problems and captured server errors; each can be handed to Devin to fix."""
+
+    __tablename__ = "support_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "error"
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(255), index=True)
+    reporter_email: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    devin_session_id: Mapped[str | None] = mapped_column(String(64))
+    devin_session_url: Mapped[str | None] = mapped_column(String(255))
+    remediation_error: Mapped[str | None] = mapped_column(Text)
+    created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

@@ -11,6 +11,7 @@ from .audit import deny
 from .config import get_settings
 from .db import get_db
 from .models import Role, User
+from .tracing import set_actor
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -62,6 +63,7 @@ def get_current_user(
     user = db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User inactive or not found")
+    set_actor(user.id, user.email)
     return user
 
 
