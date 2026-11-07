@@ -12,6 +12,7 @@ screens, approvals, connectors and analytics.
 | Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`) → swap in Okta / Entra / Google with config |
 | Dataverse tables | PostgreSQL schema via SQLAlchemy models, constraints and indexes |
 | Connectors | Authenticated HTTP client to a third-party "PayCore" customer-history API (mocked, with API key) |
+| Moving money through a provider | Approved refunds are paid back through PayCore's refunds API: idempotency keys, retries with backoff, HMAC-signed webhooks, reconciliation ([below](#payouts-through-a-payments-provider)) |
 | Power BI dashboards | Analytics page (Recharts), CSV export, Postgres BI views (`v_refund_facts`, …) |
 | Environment governance / auditing | Append-only audit log (DB trigger), every allowed **and denied** action is recorded |
 | Hosting | `docker compose up` — Postgres, API, mock provider and static frontend behind nginx |
@@ -37,7 +38,55 @@ screens, approvals, connectors and analytics.
 
 **Viewer** (`vik.auditor`) — read-only analytics and refunds list, customer PII masked, no actions, no history calls.
 
-## Controls (enforced server-side in [`backend/app/policy.py`](backend/app/policy.py))
+## Payouts through a payments provider
+
+Approving a refund now actually returns the money through the payments provider (PayCore, a mock with the same shape
+as Stripe/Adyen refunds). Admins get a **Payouts** page; everyone sees a payout badge on approved refunds and a live
+payout section in the refund drawer. The code is in [`backend/app/payouts.py`](backend/app/payouts.py) (state machine),
+[`backend/app/payments_client.py`](backend/app/payments_client.py) (provider client) and
+[`backend/app/routers/payouts.py`](backend/app/routers/payouts.py) (admin API + webhook receiver).
+
+```
+approve ──(same DB transaction)──> queued ──worker──> processing ──signed webhook / reconcile──> succeeded | failed
+                                    │  ▲                  └── 4xx decline ──> failed (admin can re-drive)
+                         5xx/timeout│  │ exponential backoff + jitter, same Idempotency-Key
+                                    ▼  │
+                              retry_scheduled ──(PAYOUT_MAX_ATTEMPTS)──> failed (retries_exhausted)
+```
+
+- **Exactly-once money movement**: the payout row is written in the approval's transaction (outbox), and every attempt
+  for that payout sends one `Idempotency-Key`. A retry after a timeout where the provider *did* refund comes back as a
+  replay, not a second refund.
+- **Transient vs definitive errors**: 5xx / 429 / timeouts are retried by a background worker with backoff; a 402
+  decline fails immediately. Re-driving a declined payout uses a new key; re-driving `retries_exhausted` keeps the old
+  key, because the provider may already have processed it.
+- **Webhooks**: `POST /webhooks/paycore` checks `PayCore-Signature` (HMAC-SHA256 over `timestamp.body`, constant-time
+  compare, 5-minute window so old webhooks can't be replayed), skips redeliveries by event id, and never moves a payout
+  out of a final state when events arrive out of order. Rejected webhooks are written to the audit log.
+- **Reconciliation**: *Reconcile with PayCore* asks the provider for the status of every payout still in flight and
+  fixes any mismatch (for example, a lost webhook).
+- **Sandbox**: the Payouts page can make the provider fail on purpose (`outage`, `lost_response`, `decline`,
+  `async_fail`, `drop_webhook`) so you can show each case live. Turn it off with `PAYMENTS_SANDBOX_CONTROLS=false`.
+- Every step is a refund timeline event and an audit row on the approval's trace id. `pytest` covers each case against
+  a fake provider running inside the test process.
+
+Config: `PAYMENTS_PROVIDER_URL`, `PAYMENTS_PROVIDER_API_KEY`, `PAYMENTS_WEBHOOK_SECRET` (shared with the provider;
+from Secrets Manager on AWS), `PAYOUT_MAX_ATTEMPTS`, `PAYOUT_RETRY_BASE_S`, `PAYOUT_RETRY_MAX_S`,
+`PAYOUT_WORKER_ENABLED`. Provider side: `PAYMENTS_WEBHOOK_URL`, `PAYMENTS_WEBHOOK_SECRET`, `PAYMENTS_SETTLE_DELAY_S`.
+To use a real PSP, swap the three functions in `payments_client.py` and the signature format in `verify_signature`.
+
+### Why this is hard to do well in Power Apps
+
+| Need | Power Apps / Power Automate | Here |
+| --- | --- | --- |
+| Call the PSP's refund API | Custom connector + premium licensing for every user who runs it | `httpx` call, ~60 lines |
+| Idempotency key that is kept across retries *and* manual re-drives | Has to be built by hand in the flow and stored in Dataverse; the connector's built-in retry policy doesn't distinguish a decline from an outage | `payouts.attempt` / `manual_retry`, unit-tested |
+| Approval and payout intent committed atomically | A canvas app `Patch` plus a flow run are separate operations; no shared transaction | One DB transaction (outbox row) |
+| Receive signed webhooks | "When an HTTP request is received" trigger (premium); flow expressions have no HMAC function, so signature checks usually need an Azure Function | HMAC + timestamp check in `verify_signature` |
+| Out-of-order / duplicate events, reconciliation | Concurrency control and dedup tables built by hand; delegation limits when querying large tables from the app | Row locks, unique event ids, terminal-state guard, `reconcile()` |
+| Test it | Manual testing in the maker portal | `pytest` simulates outages, lost responses, declines, forged and replayed webhooks |
+
+ in [`backend/app/policy.py`](backend/app/policy.py))
 
 - **Visibility**: reviewers only see refunds assigned to / escalated by / decided by them; others return `404` (no probing).
 - **Approval limits**: per-refund and per-UTC-day limits per user; org-wide hard cap applies to admins too.

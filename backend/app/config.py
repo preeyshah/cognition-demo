@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     history_provider_api_key: str = "demo-provider-key"
     history_provider_timeout_s: float = 3.0
 
+    # Payments provider (PayCore) used to actually move the money once a refund is approved.
+    payments_provider_url: str = "http://localhost:9000"
+    payments_provider_api_key: str = "demo-provider-key"
+    payments_webhook_secret: str = "whsec_demo_only"  # shared with the provider; set from a secret store
+    payments_webhook_tolerance_s: int = 300  # reject stale/replayed webhook signatures
+    payments_timeout_s: float = 5.0
+    payments_sandbox_controls: bool = True  # admin UI can inject provider failures (sandbox only)
+    payout_max_attempts: int = 5
+    payout_retry_base_s: float = 2.0
+    payout_retry_max_s: float = 60.0
+    payout_worker_enabled: bool = True
+    payout_worker_interval_s: float = 2.0
+
     seed_on_startup: bool = True
 
     @model_validator(mode="after")

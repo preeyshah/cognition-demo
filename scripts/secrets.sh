@@ -13,7 +13,7 @@ _rc_name="${APP_NAME:-refunds-console}"
 _rc_dir="${SECRETS_DIR:-$HOME/.config/refunds-console}"
 _rc_plain="$_rc_dir/secrets.env"
 _rc_enc="$_rc_dir/secrets.env.gpg"
-_rc_keys=(DEVIN_API_KEY DEVIN_ORG_ID JWT_SECRET PROVIDER_API_KEY POSTGRES_PASSWORD DATABASE_URL)
+_rc_keys=(DEVIN_API_KEY DEVIN_ORG_ID JWT_SECRET PROVIDER_API_KEY PAYMENTS_WEBHOOK_SECRET POSTGRES_PASSWORD DATABASE_URL)
 # Secrets Manager ids -> the JSON keys they hold (matches infra/data.tf)
 _rc_sm_ids=("$_rc_name/devin-api-key" "$_rc_name/app")
 

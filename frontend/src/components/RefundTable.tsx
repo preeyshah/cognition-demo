@@ -4,7 +4,7 @@ import { api, type Refund, type Status } from '../api'
 import { humanize, money, timeAgo } from '../format'
 import { AssignModal, DecisionModal, HistoryModal, type Action } from './RefundActions'
 import { RefundDrawer } from './RefundDrawer'
-import { Badge, ErrorBox, RiskBadge, Segmented, Spinner, StatusBadge } from './ui'
+import { Badge, ErrorBox, PayoutBadge, RiskBadge, Segmented, Spinner, StatusBadge } from './ui'
 
 type Filter = 'all' | Status
 type SortKey = 'created_at' | 'amount_cents' | 'risk_score' | 'sla_due_at'
@@ -141,7 +141,7 @@ export function RefundTable({
                     <td>{humanize(r.reason)}</td>
                     <td className="num"><b>{money(r.amount_cents)}</b></td>
                     <td><RiskBadge score={r.risk_score} /></td>
-                    <td><StatusBadge status={r.status} /></td>
+                    <td><StatusBadge status={r.status} />{r.payout ? <div style={{ marginTop: 4 }}><PayoutBadge payout={r.payout} /></div> : null}</td>
                     <td className="sub">{r.decided_by?.name ?? r.assigned_to?.name ?? (r.status === 'escalated' ? 'Admin queue' : '—')}</td>
                     <td className="sub">{timeAgo(r.created_at)}</td>
                     <td>{open ? (r.overdue ? <Badge kind="danger">overdue</Badge> : <span className="sub">{timeAgo(r.sla_due_at)}</span>) : <span className="sub">—</span>}</td>
@@ -179,6 +179,7 @@ export function RefundTable({
 
       {drawer ? (
         <RefundDrawer
+          key={drawer.id}
           refund={drawer}
           readOnly={readOnly}
           onClose={() => setDrawer(null)}

@@ -125,6 +125,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DB_HOST", value = aws_db_instance.main.address },
       { name = "DB_NAME", value = "refunds" },
       { name = "HISTORY_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
+      { name = "PAYMENTS_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
+      { name = "PAYMENTS_SANDBOX_CONTROLS", value = "true" }, # mock provider only; set false with a real PSP
       { name = "ALLOWED_REDIRECT_ORIGINS", value = local.app_origin },
       { name = "CORS_ORIGINS", value = local.app_origin },
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
@@ -136,6 +138,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DB_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
       { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_SECRET::" },
       { name = "HISTORY_PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
+      { name = "PAYMENTS_PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
+      { name = "PAYMENTS_WEBHOOK_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:PAYMENTS_WEBHOOK_SECRET::" },
       { name = "DEVIN_API_KEY", valueFrom = "${aws_secretsmanager_secret.devin.arn}:DEVIN_API_KEY::" },
       { name = "DEVIN_ORG_ID", valueFrom = "${aws_secretsmanager_secret.devin.arn}:DEVIN_ORG_ID::" },
     ]
@@ -152,12 +156,17 @@ resource "aws_ecs_task_definition" "provider" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
   container_definitions = jsonencode([merge(local.container_security, {
-    name             = "provider"
-    image            = local.image
-    essential        = true
-    command          = ["uvicorn", "mock_provider.main:app", "--host", "0.0.0.0", "--port", "9000"]
-    portMappings     = [{ containerPort = 9000 }]
-    secrets          = [{ name = "PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" }]
+    name         = "provider"
+    image        = local.image
+    essential    = true
+    command      = ["uvicorn", "mock_provider.main:app", "--host", "0.0.0.0", "--port", "9000"]
+    portMappings = [{ containerPort = 9000 }]
+    # Webhooks go out through CloudFront like any external PSP's would (provider SG allows 443 egress).
+    environment = [{ name = "PAYMENTS_WEBHOOK_URL", value = "${local.app_origin}/api/webhooks/paycore" }]
+    secrets = [
+      { name = "PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
+      { name = "PAYMENTS_WEBHOOK_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:PAYMENTS_WEBHOOK_SECRET::" },
+    ]
     logConfiguration = local.log_config
   })])
 }

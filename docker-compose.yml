@@ -19,6 +19,8 @@ services:
     command: ["uvicorn", "mock_provider.main:app", "--host", "0.0.0.0", "--port", "9000"]
     environment:
       PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
+      PAYMENTS_WEBHOOK_URL: http://backend:8000/webhooks/paycore
+      PAYMENTS_WEBHOOK_SECRET: ${PAYMENTS_WEBHOOK_SECRET:-whsec_demo_only}
     ports:
       - "9000:9000"
 
@@ -38,6 +40,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}  # blank => random per start
       HISTORY_PROVIDER_URL: http://provider:9000
       HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
+      PAYMENTS_PROVIDER_URL: http://provider:9000
+      PAYMENTS_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
+      PAYMENTS_WEBHOOK_SECRET: ${PAYMENTS_WEBHOOK_SECRET:-whsec_demo_only}
       ALLOWED_REDIRECT_ORIGINS: http://localhost:8080,http://localhost:5173
       CORS_ORIGINS: http://localhost:8080,http://localhost:5173
       TRUSTED_PROXY_HOPS: "1"  # nginx

@@ -67,6 +67,11 @@ resource "random_password" "provider_key" {
   special = false
 }
 
+resource "random_password" "payments_webhook" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "app" {
   name       = "${var.name}/app"
   kms_key_id = aws_kms_key.app.arn
@@ -75,8 +80,9 @@ resource "aws_secretsmanager_secret" "app" {
 resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
-    JWT_SECRET       = random_password.jwt.result
-    PROVIDER_API_KEY = random_password.provider_key.result
+    JWT_SECRET              = random_password.jwt.result
+    PROVIDER_API_KEY        = random_password.provider_key.result
+    PAYMENTS_WEBHOOK_SECRET = random_password.payments_webhook.result
   })
 }
 

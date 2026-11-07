@@ -10,8 +10,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .models import RequestTrace
+from .payouts import PayoutWorker
 from .remediation import record_error
-from .routers import admin, auth, dashboard, monitoring, refunds
+from .routers import admin, auth, dashboard, monitoring, payouts, refunds
 from .seed import seed
 from .tracing import TRACE_HEADER, TracingMiddleware, configure_logging
 
@@ -51,7 +52,13 @@ def init_db() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    s = get_settings()
+    worker = PayoutWorker(SessionLocal, s.payout_worker_interval_s) if s.payout_worker_enabled else None
+    if worker:
+        worker.start()
     yield
+    if worker:
+        worker.stop()
 
 
 configure_logging(get_settings().log_level)
@@ -65,7 +72,8 @@ app.add_middleware(
     expose_headers=[TRACE_HEADER],
 )
 app.add_middleware(TracingMiddleware, record=record_trace, on_error=record_error)
-for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router):
+for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router, payouts.router,
+          payouts.webhooks):
     app.include_router(r)
 
 
