@@ -1,3 +1,4 @@
+from uuid import uuid4
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -115,9 +116,8 @@ def create_refund(
     policies = get_policies(db)
     if body.amount_cents > policies["max_refund_cents"]:
         deny(db, request, user, "refund.create", "Amount exceeds the organisation hard cap", 422)
-    count = db.scalar(select(func.count(RefundRequest.id))) or 0
     refund = RefundRequest(
-        reference=f"RF-{1001 + count}",
+        reference=f"tmp-{uuid4().hex}",
         customer_id=customer.id,
         order_id=body.order_id,
         amount_cents=body.amount_cents,
@@ -137,6 +137,7 @@ def create_refund(
         refund.assigned_to_id = assignee.id if assignee else None
     db.add(refund)
     db.flush()
+    refund.reference = f"RF-{1000 + refund.id}"
     _event(db, refund, user, "created", None, escalation, assigned_to_id=refund.assigned_to_id)
     audit(db, request, user, "refund.create", "refund", refund.id, amount_cents=refund.amount_cents)
     db.commit()
