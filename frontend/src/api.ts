@@ -133,3 +133,10 @@ export async function download(path: string, filename: string) {
 }
 
 export const ssoLoginUrl = (redirectUri: string) => `${API_URL}/auth/sso/login?redirect_uri=${encodeURIComponent(redirectUri)}`
+
+export interface AuthConfig {
+  environment: string
+  mock_sso: boolean
+}
+
+export const getAuthConfig = () => api<AuthConfig>('/auth/config')

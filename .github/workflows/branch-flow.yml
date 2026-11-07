@@ -1,0 +1,20 @@
+name: Branch flow
+
+# Promotion model: feature work lands on `dev` via PR; `dev` deploys to the dev
+# environment on every merge; production only moves when a `dev` → `main` PR merges.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: PRs to main must come from dev
+        if: github.base_ref == 'main' && github.head_ref != 'dev'
+        run: |
+          echo "::error::Direct PRs to 'main' are not allowed."
+          echo "Open the PR against 'dev' instead — 'dev' auto-deploys, then promote with a dev → main PR."
+          exit 1
