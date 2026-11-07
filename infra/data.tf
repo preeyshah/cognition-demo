@@ -72,8 +72,17 @@ resource "aws_secretsmanager_secret_version" "app" {
   })
 }
 
-# Filled in out-of-band (aws secretsmanager put-secret-value) so the key never touches state or the repo.
+# Starts empty (self-healing off) so the first deploy works; the real key is set out-of-band with
+# `aws secretsmanager put-secret-value` and Terraform ignores it afterwards, so it never touches the repo.
 resource "aws_secretsmanager_secret" "devin" {
   name       = "${var.name}/devin-api-key"
   kms_key_id = aws_kms_key.app.arn
+}
+
+resource "aws_secretsmanager_secret_version" "devin" {
+  secret_id     = aws_secretsmanager_secret.devin.id
+  secret_string = jsonencode({ DEVIN_API_KEY = "" })
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }

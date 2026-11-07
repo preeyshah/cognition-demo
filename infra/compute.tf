@@ -136,7 +136,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DB_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
       { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_SECRET::" },
       { name = "HISTORY_PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
-      { name = "DEVIN_API_KEY", valueFrom = aws_secretsmanager_secret.devin.arn },
+      { name = "DEVIN_API_KEY", valueFrom = "${aws_secretsmanager_secret.devin.arn}:DEVIN_API_KEY::" },
     ]
     logConfiguration = local.log_config
   })])
@@ -182,7 +182,7 @@ resource "aws_ecs_service" "api" {
     enable   = true
     rollback = true
   }
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_secretsmanager_secret_version.devin, aws_secretsmanager_secret_version.app]
 }
 
 resource "aws_ecs_service" "provider" {

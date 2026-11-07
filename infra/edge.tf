@@ -100,10 +100,25 @@ resource "aws_s3_bucket_policy" "frontend" {
 resource "aws_cloudfront_function" "strip_api_prefix" {
   name    = "${var.name}-strip-api"
   runtime = "cloudfront-js-2.0"
+  publish = true
   code    = <<-JS
     function handler(event) {
       var r = event.request;
       r.uri = r.uri.replace(/^\/api(\/|$)/, '/');
+      return r;
+    }
+  JS
+}
+
+# SPA routing on the web behavior only (an error-page rewrite would also turn API 403s into HTML 200s).
+resource "aws_cloudfront_function" "spa_routes" {
+  name    = "${var.name}-spa-routes"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-JS
+    function handler(event) {
+      var r = event.request;
+      if (!r.uri.includes('.')) { r.uri = '/index.html'; }
       return r;
     }
   JS
@@ -184,6 +199,10 @@ resource "aws_cloudfront_distribution" "main" {
     cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
     compress                   = true
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_routes.arn
+    }
   }
 
   ordered_cache_behavior {
@@ -201,12 +220,6 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # SPA routing: unknown paths from S3 serve index.html.
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
 
   restrictions {
     geo_restriction {
