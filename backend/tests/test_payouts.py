@@ -139,6 +139,25 @@ def test_out_of_order_webhook_cannot_regress_terminal_state(client, db, paycore)
     assert db.get(Payout, p.id).status == PayoutStatus.succeeded
 
 
+def test_late_webhook_for_superseded_refund_cannot_fail_a_redrive(client, db, paycore):
+    _, p = approve(client, db)
+    old = paycore.refunds[p.provider_refund_id]
+    old.update(status="failed", failure_code="account_closed")
+    webhook(client, {"id": "evt_1", "type": "refund.failed", "data": old})
+    res = client.post(f"/admin/payouts/{p.id}/retry", headers=auth(user(db, ADMIN)))
+    assert res.status_code == 200, res.text
+    res = webhook(client, {"id": "evt_2", "type": "refund.failed", "data": old})  # late duplicate, new event id
+    assert res.json()["outcome"] == "ignored_stale"
+    db.expire_all()
+    p = db.get(Payout, p.id)
+    assert p.status == PayoutStatus.queued and p.failure_code is None and p.provider_refund_id is None
+    make_due(db, p)
+    payouts.run_due(db)
+    db.expire_all()
+    p = db.get(Payout, p.id)
+    assert p.status == PayoutStatus.processing and p.provider_refund_id == "re_test2"
+
+
 def test_reconciliation_catches_lost_webhook(client, db, paycore):
     _, p = approve(client, db)
     paycore.refunds[p.provider_refund_id]["status"] = "failed"

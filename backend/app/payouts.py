@@ -100,7 +100,8 @@ def attempt(db: Session, payout_id: int) -> Payout | None:
     payout.attempts += 1
     res = payments_client.create_refund(
         payout.idempotency_key, refund.order_id, payout.amount_cents, payout.currency,
-        {"refund_reference": refund.reference, "customer_id": refund.customer.external_id},
+        {"refund_reference": refund.reference, "customer_id": refund.customer.external_id,
+         "idempotency_key": payout.idempotency_key},
     )
     payout.last_http_status = res.status_code
     if res.ok:
@@ -163,6 +164,7 @@ def manual_retry(db: Session, payout: Payout, actor: User) -> None:
     payout.manual_retries += 1
     if payout.failure_code != "retries_exhausted":
         payout.idempotency_key = f"{base_key(payout.refund)}-r{payout.manual_retries}"
+        payout.provider_refund_id = None
     previous = payout.failure_code
     payout.status = PayoutStatus.queued
     payout.attempts = 0
@@ -197,6 +199,12 @@ def apply_provider_state(db: Session, payout: Payout, provider: dict, source: st
     """Move a payout to the provider's terminal state. Returns False if nothing changed."""
     status = provider.get("status")
     if payout.status in TERMINAL or status not in ("succeeded", "failed"):
+        return False
+    # Late events for a superseded provider refund (e.g. after an admin re-drive) must not touch the new attempt.
+    if payout.provider_refund_id and provider.get("id") and provider["id"] != payout.provider_refund_id:
+        return False
+    key = (provider.get("metadata") or {}).get("idempotency_key")
+    if key and key != payout.idempotency_key:
         return False
     payout.provider_refund_id = payout.provider_refund_id or provider.get("id")
     if status == "succeeded":
@@ -250,6 +258,11 @@ def reconcile(db: Session, actor: User | None = None) -> dict:
         if not res.ok:
             errors.append({"reference": payout.refund.reference, "error": res.error})
             continue
+        # Re-read under a row lock: a webhook may have settled this payout during the provider call.
+        payout = db.scalars(
+            select(Payout).where(Payout.id == payout.id).with_for_update(of=Payout)
+            .execution_options(populate_existing=True)
+        ).unique().one()
         before = payout.status.value
         if apply_provider_state(db, payout, res.body, "reconciliation"):
             changed.append({"reference": payout.refund.reference, "from": before, "to": payout.status.value})
