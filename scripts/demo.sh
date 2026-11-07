@@ -67,6 +67,9 @@ cmd_up() {
   [[ -n "${DEVIN_API_KEY:-}" ]] || log "DEVIN_API_KEY not set: tickets will be recorded but not sent to Devin"
   export DEVIN_BASE_BRANCH="$BRANCH" JWT_SECRET="${JWT_SECRET:-demo-$(date +%s)-$RANDOM}"
   (cd "$WT" && docker compose -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1 || true
+   for port in 8000 8080 9000 "${DB_PORT:-5433}"; do
+     ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || die "port $port is in use; stop the other stack first (docker compose down)"
+   done
    log "Building and starting the demo stack (log: .demo/compose.log)"
    docker compose -p "$PROJECT" up --build -d --wait >compose.log 2>&1 || { tail -20 compose.log; exit 1; })
   log "Demo running from $BRANCH @ $(git -C "$WT" rev-parse --short HEAD): http://localhost:8080 (sign in as $ADMIN)"
