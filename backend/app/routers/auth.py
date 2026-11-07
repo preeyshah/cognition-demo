@@ -21,7 +21,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..models import Role, User
 from ..schemas import TokenIn, TokenOut, UserOut
-from ..security import create_token, decode_token, get_current_user
+from ..security import consume_code, create_token, decode_token, get_current_user
 from ..services import now_utc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -32,15 +32,8 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
-def _request_origin(request: Request) -> str:
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
-    return f"{proto}://{host}"
-
-
 def _validate_redirect(request: Request, redirect_uri: str) -> None:
-    origin = _origin(redirect_uri)
-    if origin not in get_settings().redirect_origins and origin != _request_origin(request):
+    if _origin(redirect_uri) not in get_settings().redirect_origins:
         raise HTTPException(status_code=400, detail="redirect_uri origin is not allowed")
 
 
@@ -103,6 +96,8 @@ def sso_authorize(
 @router.post("/token", response_model=TokenOut)
 def exchange_code(body: TokenIn, request: Request, db: Session = Depends(get_db)):
     payload = decode_token(body.code, typ="sso_code")
+    if not consume_code(payload):
+        raise HTTPException(status_code=401, detail="Authorization code already used")
     user = db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User inactive or not found")

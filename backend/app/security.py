@@ -1,3 +1,5 @@
+import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -17,7 +19,8 @@ def create_token(user: User, typ: str = "access", minutes: int | None = None) ->
     s = get_settings()
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=minutes if minutes is not None else s.access_token_minutes)
-    payload = {"sub": str(user.id), "role": user.role.value, "typ": typ, "iat": now, "exp": exp}
+    payload = {"sub": str(user.id), "role": user.role.value, "typ": typ, "iat": now, "exp": exp,
+               "jti": secrets.token_urlsafe(12)}
     return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
 
 
@@ -30,6 +33,23 @@ def decode_token(token: str, typ: str = "access") -> dict:
     if payload.get("typ") != typ:
         raise HTTPException(status_code=401, detail="Wrong token type")
     return payload
+
+
+_used_codes: dict[str, float] = {}
+_used_lock = threading.Lock()
+
+
+def consume_code(payload: dict) -> bool:
+    """Mark a one-time SSO code as used; False if it was already redeemed (single-process store)."""
+    now = datetime.now(timezone.utc).timestamp()
+    with _used_lock:
+        for jti in [j for j, exp in _used_codes.items() if exp < now]:
+            del _used_codes[jti]
+        jti = payload.get("jti")
+        if not jti or jti in _used_codes:
+            return False
+        _used_codes[jti] = float(payload["exp"])
+        return True
 
 
 def get_current_user(
