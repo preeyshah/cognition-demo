@@ -150,7 +150,7 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
             "decided": len(mine), "approved": len(ok), "rejected": len(mine) - len(ok),
             "escalated": sum(1 for r in rows if r.escalated_by_id == u.id),
             "approved_amount_cents": sum(r.amount_cents for r in ok),
-            "approval_rate": _rate(len(ok), len(mine)),
+            "approval_rate": round(len(ok) / len(mine), 3),
             "avg_decision_hours": _avg(_hours(r) for r in mine),
             "open_assigned": open_by_user.get(u.id, 0),
             "approval_limit_cents": u.approval_limit_cents,
