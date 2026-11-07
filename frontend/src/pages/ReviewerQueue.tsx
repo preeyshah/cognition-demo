@@ -45,7 +45,7 @@ export function ReviewerHistory() {
   return (
     <>
       <PageHead title="My history" subtitle="Refunds you decided or escalated." />
-      <RefundTable statuses={['all', 'approved', 'rejected', 'escalated']} />
+      <RefundTable statuses={['approved', 'rejected', 'escalated']} initialStatus="approved" />
     </>
   )
 }
