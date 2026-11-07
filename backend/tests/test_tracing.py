@@ -100,3 +100,18 @@ def test_support_request_flow(client, db, monkeypatch):
     sr = db.get(SupportRequest, sr_id)
     assert sr.status == "devin_working" and sr.devin_session_url.endswith("/abc")
     assert "open a PR" in sent["prompt"] and "Approve button greyed out" in sent["prompt"]
+
+
+def test_audit_log_can_be_filtered_by_trace_id(client, db):
+    j = user(db, JORDAN)
+    admin = user(db, "priya.admin@acmepay.com")
+    r1, r2 = make_refund(db, j), make_refund(db, j)
+    t1 = client.post(f"/refunds/{r1.id}/approve", headers=auth(j), json={}).headers["X-Trace-Id"]
+    client.post(f"/refunds/{r2.id}/approve", headers=auth(j), json={})
+
+    rows = client.get("/admin/audit-log", params={"trace_id": t1}, headers=auth(admin)).json()
+    assert rows and {row["trace_id"] for row in rows} == {t1}
+    assert [row["entity_id"] for row in rows if row["action"] == "refund.approve"] == [str(r1.id)]
+
+    assert client.get("/admin/audit-log", params={"trace_id": "does-not-exist"}, headers=auth(admin)).json() == []
+    assert client.get("/admin/audit-log", params={"trace_id": t1}, headers=auth(j)).status_code == 403

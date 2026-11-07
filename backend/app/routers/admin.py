@@ -101,6 +101,7 @@ def audit_log(
     action: str | None = None,
     actor_id: int | None = None,
     success: bool | None = None,
+    trace_id: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=200, le=1000),
     _: User = Depends(admin_only),
     db: Session = Depends(get_db),
@@ -112,6 +113,8 @@ def audit_log(
         q = q.where(AuditLog.actor_id == actor_id)
     if success is not None:
         q = q.where(AuditLog.success.is_(success))
+    if trace_id:
+        q = q.where(AuditLog.trace_id == trace_id)
     return [
         {"id": a.id, "created_at": a.created_at, "actor_email": a.actor_email, "action": a.action,
          "entity_type": a.entity_type, "entity_id": a.entity_id, "success": a.success,

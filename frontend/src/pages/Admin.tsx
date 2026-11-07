@@ -227,19 +227,21 @@ function PolicyRow({ p, onSaved }: { p: Policy; onSaved: () => void }) {
   )
 }
 
-interface AuditRow { id: number; created_at: string; actor_email: string | null; action: string; entity_type: string | null; entity_id: string | null; success: boolean; ip_address: string | null; detail: Record<string, unknown> }
+interface AuditRow { id: number; created_at: string; actor_email: string | null; action: string; entity_type: string | null; entity_id: string | null; success: boolean; ip_address: string | null; detail: Record<string, unknown>; trace_id: string | null }
 const AUDIT_FILTERS = ['all', 'denied', 'refund.', 'customer.', 'user.', 'policy.', 'auth.', 'admin.'] as const
 
 export function AuditLog() {
   const [filter, setFilter] = useState<(typeof AUDIT_FILTERS)[number]>('all')
+  const [traceId, setTraceId] = useState('')
   const [rows, setRows] = useState<AuditRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     const params = new URLSearchParams({ limit: '500' })
     if (filter === 'denied') params.set('success', 'false')
     else if (filter !== 'all') params.set('action', filter)
+    if (traceId.trim()) params.set('trace_id', traceId.trim())
     api<AuditRow[]>(`/admin/audit-log?${params}`).then(setRows).catch((e) => setError(e.message))
-  }, [filter])
+  }, [filter, traceId])
   useEffect(load, [load])
   return (
     <>
@@ -248,6 +250,9 @@ export function AuditLog() {
       </PageHead>
       <Segmented options={AUDIT_FILTERS} value={filter} onChange={setFilter}
         labels={{ all: 'All', denied: 'Denied only', 'refund.': 'Refund actions', 'customer.': 'History access', 'user.': 'User changes', 'policy.': 'Policy changes', 'auth.': 'Logins', 'admin.': 'Admin' }} />
+      <div style={{ marginTop: 8 }}>
+        <input placeholder="Filter by trace id (tr_…)" maxLength={64} style={{ width: 320 }} value={traceId} onChange={(e) => setTraceId(e.target.value)} />
+      </div>
       <ErrorBox message={error} />
       <div className="table-wrap" style={{ marginTop: 12 }}>
         {!rows ? <Spinner /> : (
