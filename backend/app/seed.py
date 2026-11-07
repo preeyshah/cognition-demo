@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Customer,
+    DataSubjectRequest,
     PolicySetting,
     RefundEvent,
     RefundReason,
@@ -29,6 +30,8 @@ USERS = [
     ("maria.gomez@acmepay.com", "Maria Gomez", Role.reviewer, 2_500, 20_000),
     ("vik.auditor@acmepay.com", "Vik Mehta", Role.viewer, 0, 0),
 ]
+
+DORMANT_USER = ("dana.brooks@contractor.acmepay.com", "Dana Brooks (contractor)")
 
 FIRST = ["Olivia", "Liam", "Emma", "Noah", "Ava", "Ethan", "Sophia", "Mason", "Isabella", "Lucas",
          "Mia", "Arjun", "Chen", "Fatima", "Diego", "Hana", "Kwame", "Lena", "Omar", "Zoe"]
@@ -63,6 +66,7 @@ def seed(db: Session) -> None:
             db.add(PolicySetting(key=key, value=value, description=desc))
     db.flush()
     if db.scalar(select(User.id).limit(1)):
+        seed_compliance_findings(db)
         db.commit()
         return
 
@@ -160,4 +164,22 @@ def seed(db: Session) -> None:
     # Open auto-escalations awaiting an admin: high risk and above every reviewer's limit.
     for hours, amount, risk in [(2, 42_000, 84), (9, 18_500, 77), (14, 380_000, 35), (26, 615_000, 52)]:
         make(now - timedelta(hours=hours), rng.choice(customers), amount, risk, rng.choice(list(RefundReason)), force_open=True)
+    seed_compliance_findings(db)
     db.commit()
+
+
+def seed_compliance_findings(db: Session) -> None:
+    """Realistic audit findings for the Compliance Center demo (idempotent; added once, then left alone)."""
+    now = now_utc()
+    if db.scalar(select(User).where(User.email == DORMANT_USER[0])) is None:
+        # A contractor who left months ago but was never offboarded: fails the dormant-account control.
+        db.add(User(email=DORMANT_USER[0], name=DORMANT_USER[1], role=Role.viewer, approval_limit_cents=0,
+                    daily_approval_limit_cents=0, created_at=now - timedelta(days=400),
+                    last_login_at=now - timedelta(days=137)))
+    customer = db.scalar(select(Customer).where(Customer.external_id == "cus_1007"))
+    if customer is not None and db.scalar(select(DataSubjectRequest.id).limit(1)) is None:
+        # An erasure request that slipped past the 30-day GDPR deadline.
+        db.add(DataSubjectRequest(customer_id=customer.id, kind="erasure", requested_by_email="privacy@acmepay.com",
+                                  note="Customer emailed privacy@ asking for their data to be deleted.",
+                                  created_at=now - timedelta(days=34), due_at=now - timedelta(days=4)))
+    db.flush()

@@ -123,13 +123,15 @@ export async function api<T = unknown>(path: string, method = 'GET', body?: unkn
   return (await request(path, method, body)).json() as Promise<T>
 }
 
-export async function download(path: string, filename: string) {
-  const blob = await (await request(path)).blob()
+export async function download(path: string, filename: string): Promise<Headers> {
+  const res = await request(path)
+  const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
+  return res.headers
 }
 
 export const ssoLoginUrl = (redirectUri: string) => `${API_URL}/auth/sso/login?redirect_uri=${encodeURIComponent(redirectUri)}`

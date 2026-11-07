@@ -7,6 +7,7 @@ import { RoleBadge, Spinner } from './components/ui'
 import { money } from './format'
 import { AllRefunds, AuditLog, Escalations, Policies, Team, ViewAs } from './pages/Admin'
 import { Analytics } from './pages/Analytics'
+import { ComplianceCenter } from './pages/Compliance'
 import { Login } from './pages/Login'
 import { ReviewerHistory, ReviewerQueue } from './pages/ReviewerQueue'
 
@@ -31,12 +32,14 @@ function pagesFor(user: User): Page[] {
       { path: '/team', label: 'Team & limits', element: <Team me={user} /> },
       { path: '/policies', label: 'Policies', element: <Policies /> },
       { path: '/audit', label: 'Audit log', element: <AuditLog /> },
+      { path: '/compliance', label: 'Compliance', element: <ComplianceCenter admin /> },
       { path: '/view-as', label: 'View as', element: <ViewAs me={user} /> },
     ]
   }
   return [
     { path: '/analytics', label: 'Analytics', element: <Analytics user={user} /> },
     { path: '/refunds', label: 'All refunds', element: <AllRefunds canCreate={false} viewer /> },
+    { path: '/compliance', label: 'Compliance', element: <ComplianceCenter admin={false} /> },
   ]
 }
 

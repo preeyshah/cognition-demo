@@ -47,11 +47,14 @@ def trace_bundle(db: Session, trace_id: str) -> dict:
     }
 
 
+_KIND_LABEL = {"error": "production error", "compliance": "failing compliance control", "guardrail": "guardrail alert"}
+
+
 def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
     s = get_settings()
     lines = [
         f"Repo: {s.devin_repo} (base branch: {s.devin_base_branch})",
-        f"A {'production error' if sr.kind == 'error' else 'support request'} was raised in the Refunds Console "
+        f"A {_KIND_LABEL.get(sr.kind, 'support request')} was raised in the Refunds Console "
         f"(support request #{sr.id}).",
         "",
         f"Title: {sr.title}",
@@ -63,6 +66,11 @@ def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
 
         lines += ["", "Trace bundle (request, audit log and refund events for this trace):",
                   json.dumps(bundle, default=str, indent=2)[:12000]]
+    if sr.kind == "compliance":
+        lines += ["", "This is an audit finding: fix the system so the control passes. Never weaken, skip or special-case "
+                  "the check in backend/app/compliance.py; add a regression test proving the control now holds. "
+                  "If the gap is a process/data issue an admin can resolve in the Compliance Center (e.g. a "
+                  "missing access review), say so in the session and do not open a PR."]
     lines += [
         "",
         "Investigate the root cause, reproduce it with a failing test in backend/tests where possible, fix it, "

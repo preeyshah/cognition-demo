@@ -11,7 +11,7 @@ from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .models import RequestTrace
 from .remediation import record_error
-from .routers import admin, auth, dashboard, monitoring, refunds
+from .routers import admin, auth, compliance, dashboard, monitoring, refunds
 from .seed import seed
 from .tracing import TRACE_HEADER, TracingMiddleware, configure_logging
 
@@ -65,7 +65,7 @@ app.add_middleware(
     expose_headers=[TRACE_HEADER],
 )
 app.add_middleware(TracingMiddleware, record=record_trace, on_error=record_error)
-for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router):
+for r in (auth.router, refunds.router, dashboard.router, admin.router, monitoring.router, compliance.router):
     app.include_router(r)
 if get_settings().mock_sso_enabled:
     app.include_router(auth.sso_router)
