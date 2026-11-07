@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: refunds
+      POSTGRES_USER: refunds
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-refunds}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U refunds"]
+      interval: 2s
+      retries: 30
+
+  provider:
+    build: ./backend
+    command: ["uvicorn", "mock_provider.main:app", "--host", "0.0.0.0", "--port", "9000"]
+    environment:
+      PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
+    ports:
+      - "9000:9000"
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+      provider:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@db:5432/refunds
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      HISTORY_PROVIDER_URL: http://provider:9000
+      HISTORY_PROVIDER_API_KEY: ${PROVIDER_API_KEY:-demo-provider-key}
+      ALLOWED_REDIRECT_ORIGINS: http://localhost:8080,http://localhost:5173
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
