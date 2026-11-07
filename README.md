@@ -157,6 +157,39 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 - With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `main`. The session URL is stored on the ticket (`GET /admin/support/requests`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
 
+## Secrets (`scripts/secrets.sh`)
+
+`setup.sh` and `scripts/db-ops.sh` load `DEVIN_API_KEY`, `DEVIN_ORG_ID`, `JWT_SECRET`, `PROVIDER_API_KEY`, ... in this order,
+never overriding something already exported:
+
+1. the current environment
+2. **AWS Secrets Manager** (`refunds-console/devin-api-key`, `refunds-console/app`, `refunds-console/local`) when AWS credentials work
+3. `~/.config/refunds-console/secrets.env.gpg`: GPG/AES-256, passphrase-protected (outside the repo)
+4. `~/.config/refunds-console/secrets.env`: plaintext fallback; refused unless mode `600` and owned by you
+
+```bash
+scripts/secrets.sh init     # prompts (no echo) and writes the encrypted local store
+scripts/secrets.sh status   # where each secret came from (values never printed)
+scripts/secrets.sh push     # copy the local store into Secrets Manager, then delete the local file
+```
+
+## Database monitoring & redundancy
+
+On AWS (Terraform, `infra/data.tf` + `infra/db_resilience.tf`):
+- **Multi-AZ standby** with automatic failover, and an optional read replica (`-var db_read_replica=true`).
+- **Backups:** 14-day point-in-time recovery, plus an AWS Backup plan (daily kept 35 days, weekly kept 180 days) that copies every backup to a vault in `dr_region`.
+- **Monitoring:** Enhanced Monitoring (60 s), Performance Insights, and a CloudWatch dashboard.
+- **Alarms:** CPU, free storage, memory, connections, read/write latency and replica lag. These and the RDS failover/failure/storage events go to the alerts SNS topic (`-var alert_email=...`).
+
+Anywhere (`scripts/db-ops.sh`):
+```bash
+scripts/db-ops.sh check [url]            # health: connections, size, cache hit, replication, long queries, vacuum
+scripts/db-ops.sh backup [url]           # verified pg_dump into ./backups (rotates, mode 600)
+scripts/db-ops.sh restore-test <dump>    # restore into a throwaway Postgres and count rows
+scripts/db-ops.sh aws-harden <rds-id> [--replica]   # apply all of the above to any existing RDS instance
+scripts/db-ops.sh aws-status <rds-id>
+```
+
 ## CI/CD
 
 - `.github/workflows/ci.yml` (every PR and push): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
@@ -183,8 +216,7 @@ cd infra/bootstrap && terraform init && terraform apply          # state bucket,
 gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform output -raw deploy_role_arn)"
 gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
 gh variable set AWS_REGION        --body us-east-1
-# optional self-healing: gh variable set DEVIN_ORG_ID ...; after first deploy:
-# aws secretsmanager put-secret-value --secret-id refunds-console/devin-api-key --secret-string "{\"DEVIN_API_KEY\":\"$DEVIN_API_KEY\"}"
+# optional self-healing: after the first deploy, `scripts/secrets.sh push` stores the Devin key in Secrets Manager.
 # ECS reads secrets at task start, so roll the API tasks to pick the key up:
 # aws ecs update-service --cluster refunds-console --service api --force-new-deployment
 ```

@@ -21,3 +21,11 @@ output "ecs_cluster" {
 output "db_endpoint" {
   value = aws_db_instance.main.address
 }
+
+output "db_replica_endpoint" {
+  value = try(aws_db_instance.replica[0].address, null)
+}
+
+output "db_dashboard" {
+  value = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.db.dashboard_name}"
+}

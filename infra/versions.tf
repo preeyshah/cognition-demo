@@ -33,3 +33,12 @@ provider "aws" {
     tags = { app = var.name, managed_by = "terraform" }
   }
 }
+
+# Disaster-recovery region for cross-region backup copies.
+provider "aws" {
+  alias  = "dr"
+  region = var.dr_region
+  default_tags {
+    tags = { app = var.name, managed_by = "terraform" }
+  }
+}

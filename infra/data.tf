@@ -39,14 +39,22 @@ resource "aws_db_instance" "main" {
   parameter_group_name   = aws_db_parameter_group.pg.name
   publicly_accessible    = false
 
-  backup_retention_period         = 7
-  deletion_protection             = true
-  skip_final_snapshot             = false
-  final_snapshot_identifier       = "${var.name}-final"
-  performance_insights_enabled    = true
-  performance_insights_kms_key_id = aws_kms_key.app.arn
-  enabled_cloudwatch_logs_exports = ["postgresql"]
-  auto_minor_version_upgrade      = true
+  # Redundancy: synchronous standby in a second AZ (automatic failover), PITR backups, Enhanced Monitoring.
+  multi_az                              = var.db_multi_az
+  backup_retention_period               = var.db_backup_retention_days
+  backup_window                         = "03:00-04:00"
+  maintenance_window                    = "sun:04:30-sun:05:30"
+  copy_tags_to_snapshot                 = true
+  monitoring_interval                   = 60
+  monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
+  performance_insights_retention_period = 7
+  deletion_protection                   = true
+  skip_final_snapshot                   = false
+  final_snapshot_identifier             = "${var.name}-final"
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = aws_kms_key.app.arn
+  enabled_cloudwatch_logs_exports       = ["postgresql"]
+  auto_minor_version_upgrade            = true
 }
 
 resource "random_password" "jwt" {

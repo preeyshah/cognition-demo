@@ -50,3 +50,33 @@ variable "waf_rate_limit_per_5min" {
   type    = number
   default = 1000
 }
+
+variable "db_multi_az" {
+  description = "Synchronous standby in a second AZ with automatic failover."
+  type        = bool
+  default     = true
+}
+
+variable "db_backup_retention_days" {
+  description = "Automated backup / point-in-time-recovery window."
+  type        = number
+  default     = 14
+}
+
+variable "db_read_replica" {
+  description = "Create a read replica (offload analytics, promotable for DR)."
+  type        = bool
+  default     = false
+}
+
+variable "dr_region" {
+  description = "Region that receives a daily copy of every database backup."
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "alert_email" {
+  description = "Optional email subscribed to the alerts SNS topic."
+  type        = string
+  default     = ""
+}

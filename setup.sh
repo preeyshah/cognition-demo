@@ -9,6 +9,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 if [[ -f .env ]]; then set -a; . ./.env; set +a; fi  # same overrides Compose reads
+# DEVIN_API_KEY etc.: env > AWS Secrets Manager > ~/.config/refunds-console (see scripts/secrets.sh)
+[[ "${1:-}" == down ]] || source scripts/secrets.sh
 pg_pw() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${POSTGRES_PASSWORD:-refunds}"; }
 
 LOCAL_URL="postgresql+psycopg://refunds:$(pg_pw)@db:5432/refunds"  # the Compose Postgres
@@ -120,6 +122,11 @@ case "$cmd" in
     (cd frontend && npm ci --silent && npm run build \
       && aws s3 sync dist "s3://$(terraform -chdir=../infra output -raw frontend_bucket)" --delete \
       && aws cloudfront create-invalidation --distribution-id "$(terraform -chdir=../infra output -raw cloudfront_distribution_id)" --paths '/*' >/dev/null)
+    if [[ -n "${DEVIN_API_KEY:-}" && "${_RC_SRC_DEVIN_API_KEY:-}" != aws:* ]]; then
+      scripts/secrets.sh push  # move the locally held key into Secrets Manager, then roll the API tasks
+      aws ecs update-service --region "$region" --cluster "$(terraform -chdir=infra output -raw ecs_cluster)" \
+        --service api --force-new-deployment >/dev/null
+    fi
     log "Ready: $(terraform -chdir=infra output -raw app_url)"
     ;;
   inspect)
