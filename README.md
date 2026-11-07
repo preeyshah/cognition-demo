@@ -133,7 +133,7 @@ Reset demo data with `docker compose down -v`.
 
 `ENVIRONMENT` defaults to `dev` everywhere (local dev, Compose, tests). Set `ENVIRONMENT=prod` for a hardened
 deployment: the mock IdP endpoints are not mounted, demo seeding is disabled unless `SEED_ON_STARTUP=true`, the payouts
-sandbox failure controls are off unless `PAYMENTS_SANDBOX_CONTROLS=true`, and a missing `JWT_SECRET` fails startup. The SPA learns the mode from the public `GET /api/auth/config` endpoint.
+sandbox failure controls are off unless `PAYMENTS_SANDBOX_CONTROLS=true`, and a missing `JWT_SECRET` or `PAYMENTS_WEBHOOK_SECRET` fails startup. The SPA learns the mode from the public `GET /api/auth/config` endpoint.
 
 ### Option B — local dev
 
@@ -154,7 +154,7 @@ npm run dev                                       # http://localhost:5173
 ```
 
 Config is via env vars (see [`backend/app/config.py`](backend/app/config.py) and [`.env.example`](.env.example)):
-`ENVIRONMENT`, `DATABASE_URL`, `JWT_SECRET` (required in prod), `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP` (off by default in prod), `MOCK_MFA_CODE` (dev SSO second factor), `GUARDRAIL_ALERT_THRESHOLD` / `GUARDRAIL_ALERT_WINDOW_MINUTES` (auto-ticket on denied-action spikes).
+`ENVIRONMENT`, `DATABASE_URL`, `JWT_SECRET` (required in prod), `PAYMENTS_WEBHOOK_SECRET` (required in prod; see Payouts), `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP` (off by default in prod), `MOCK_MFA_CODE` (dev SSO second factor), `GUARDRAIL_ALERT_THRESHOLD` / `GUARDRAIL_ALERT_WINDOW_MINUTES` (auto-ticket on denied-action spikes).
 Frontend: `VITE_API_URL` (defaults to `/api`).
 
 ### Tests
@@ -187,7 +187,7 @@ npm run test:e2e                  # E2E_BASE_URL overrides the default http://lo
 
 ## Production notes
 
-- Run with `ENVIRONMENT=prod` (the AWS Terraform deployment does): this unmounts the mock SSO IdP, disables demo seeding and requires a strong `JWT_SECRET`. Then replace the mock SSO with a real OIDC provider — the frontend already uses the redirect + code-exchange flow.
+- Run with `ENVIRONMENT=prod` (the AWS Terraform deployment does): this unmounts the mock SSO IdP, disables demo seeding and requires a strong `JWT_SECRET` and `PAYMENTS_WEBHOOK_SECRET`. Then replace the mock SSO with a real OIDC provider — the frontend already uses the redirect + code-exchange flow.
 - Replace `mock_provider` with the real vendor URL/key via `HISTORY_PROVIDER_URL` / `HISTORY_PROVIDER_API_KEY` (store as secrets).
 - Use Alembic migrations instead of `create_all` once the schema stabilises.
 - The same pattern (policy module + audit log + role-aware React screens) is a template for the KYC review queue and feature-flag admin panel.
