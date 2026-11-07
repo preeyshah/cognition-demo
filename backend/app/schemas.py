@@ -1,3 +1,4 @@
+from typing import Literal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -98,7 +99,7 @@ class RefundCreateIn(BaseModel):
     customer_external_id: str
     order_id: str = Field(min_length=1, max_length=64)
     amount_cents: int = Field(gt=0)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: Literal["USD"] = "USD"  # limits and analytics are USD-denominated
     reason: RefundReason
     description: str = Field(default="", max_length=2000)
     risk_score: int = Field(default=0, ge=0, le=100)
