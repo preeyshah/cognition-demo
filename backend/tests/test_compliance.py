@@ -172,8 +172,11 @@ def test_security_logging_requires_each_category(client, db):
     db.commit()
     res = compliance.evaluate(db, compliance.BY_ID["AU-01"])
     assert res["status"] == "warn" and set(res["evidence"]["missing_categories"]) == {"refund decision", "PII access"}
-    audit(db, None, admin, "refund.approve", "refund", 1)
+    audit(db, None, admin, "refund.escalate", "refund", 1)
     audit(db, None, admin, "customer.history", "customer", "cus_1001")
+    db.commit()
+    assert compliance.evaluate(db, compliance.BY_ID["AU-01"])["evidence"]["missing_categories"] == ["refund decision"]
+    audit(db, None, admin, "refund.approve", "refund", 1)
     db.commit()
     assert compliance.evaluate(db, compliance.BY_ID["AU-01"])["status"] == "pass"
 

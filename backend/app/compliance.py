@@ -168,7 +168,7 @@ def check_session_timeout(_: Session) -> Result:
 # Successful events of each kind must be in the log; a denied attempt or a refund.create is not a decision.
 REQUIRED_LOG_EVENTS = {
     "sign-in": ("auth.login",),
-    "refund decision": ("refund.approve", "refund.reject", "refund.escalate"),
+    "refund decision": ("refund.approve", "refund.reject"),  # escalation leaves the refund undecided
     "PII access": ("customer.history",),
 }
 
