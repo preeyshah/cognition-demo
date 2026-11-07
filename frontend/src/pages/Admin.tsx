@@ -365,7 +365,7 @@ export function SupportTickets() {
                   <td><Badge kind={r.kind === 'error' ? 'danger' : 'muted'}>{r.kind}</Badge></td>
                   <td style={{ maxWidth: 420 }}>
                     <b>{r.title}</b>
-                    <div className="sub">{r.reporter_email}{r.description ? ` · ${r.description.split('\n')[0]}` : ''}</div>
+                    <div className="sub" style={{ whiteSpace: 'pre-line' }}>{r.reporter_email}{r.description ? ` · ${r.description}` : ''}</div>
                     {r.remediation_error ? <div className="tone-danger" style={{ fontSize: 12 }}>{r.remediation_error}</div> : null}
                   </td>
                   <td className="sub"><code>{r.trace_id ?? '—'}</code></td>
