@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     devin_api_key: str = ""
     devin_org_id: str = ""
     devin_repo: str = "preeyshah/cognition-demo"
+    devin_base_branch: str = "main"
+    devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
     remediation_cooldown_minutes: int = 60
 

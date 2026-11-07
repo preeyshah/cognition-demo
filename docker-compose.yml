@@ -39,6 +39,7 @@ services:
       TRUSTED_PROXY_HOPS: "1"  # nginx
       DEVIN_API_KEY: ${DEVIN_API_KEY:-}  # blank => self-healing loop records tickets but doesn't call Devin
       DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
+      DEVIN_BASE_BRANCH: ${DEVIN_BASE_BRANCH:-main}
     ports:
       - "8000:8000"
 

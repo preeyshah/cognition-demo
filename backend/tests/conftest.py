@@ -2,6 +2,7 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SEED_ON_STARTUP"] = "false"
+os.environ["DEVIN_API_KEY"] = ""  # never call the real Devin API from tests
 
 import pytest
 from fastapi.testclient import TestClient

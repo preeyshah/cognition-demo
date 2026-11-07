@@ -19,7 +19,8 @@ log = logging.getLogger("refunds.remediation")
 
 def enabled() -> bool:
     s = get_settings()
-    return bool(s.devin_api_key and s.devin_org_id)
+    # Org-scoped service-user keys (cog_...) need the org id (v3 API); legacy personal keys (apk_...) use v1.
+    return bool(s.devin_api_key and (s.devin_org_id or s.devin_api_key.startswith("apk_")))
 
 
 def trace_bundle(db: Session, trace_id: str) -> dict:
@@ -49,7 +50,7 @@ def trace_bundle(db: Session, trace_id: str) -> dict:
 def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
     s = get_settings()
     lines = [
-        f"Repo: {s.devin_repo}",
+        f"Repo: {s.devin_repo} (base branch: {s.devin_base_branch})",
         f"A {'production error' if sr.kind == 'error' else 'support request'} was raised in the Refunds Console "
         f"(support request #{sr.id}).",
         "",
@@ -65,7 +66,8 @@ def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
     lines += [
         "",
         "Investigate the root cause, reproduce it with a failing test in backend/tests where possible, fix it, "
-        "make sure CI (ruff, pytest, frontend lint/build) passes, and open a PR against main that references "
+        "make sure CI (ruff, pytest, frontend lint/build) passes, and open a PR against "
+        f"{s.devin_base_branch} that references "
         f"support request #{sr.id} and trace {sr.trace_id or '-'}. Do not weaken any authorization checks or limits. "
         "If it is not a code defect (e.g. a user question or expected policy denial), do not open a PR; "
         "explain why in the session instead.",
@@ -75,12 +77,13 @@ def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
 
 def start_devin_session(prompt: str, title: str) -> dict:
     s = get_settings()
-    res = httpx.post(
-        f"{s.devin_api_url}/v3/organizations/{s.devin_org_id}/sessions",
-        headers={"Authorization": f"Bearer {s.devin_api_key}"},
-        json={"prompt": prompt, "title": title, "tags": ["refunds-console", "auto-remediation"]},
-        timeout=20,
-    )
+    body = {"prompt": prompt, "title": title, "tags": ["refunds-console", "auto-remediation"],
+            "max_acu_limit": s.devin_max_acu}
+    if s.devin_api_key.startswith("apk_") or not s.devin_org_id:
+        url = f"{s.devin_api_url}/v1/sessions"
+    else:
+        url = f"{s.devin_api_url}/v3/organizations/{s.devin_org_id}/sessions"
+    res = httpx.post(url, headers={"Authorization": f"Bearer {s.devin_api_key}"}, json=body, timeout=20)
     res.raise_for_status()
     return res.json()
 
