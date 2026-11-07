@@ -1,10 +1,23 @@
 import hashlib
+from datetime import timedelta
 
 from sqlalchemy import update
 
+from app import compliance, remediation
 from app.audit import audit, verify_chain
-from app.models import AccessReview, AuditLog, Customer, DataSubjectRequest, RefundRequest, RefundStatus, SupportRequest, User
+from app.models import (
+    AccessReview,
+    AuditLog,
+    Customer,
+    DataSubjectRequest,
+    RefundEvent,
+    RefundRequest,
+    RefundStatus,
+    SupportRequest,
+    User,
+)
 from app.seed import DORMANT_USER
+from app.services import now_utc
 
 from .conftest import auth, make_refund, user
 
@@ -124,3 +137,72 @@ def test_fix_with_devin_opens_compliance_ticket(client, db):
     assert sr.kind == "compliance" and "PCI DSS 4.0 8.2.8" in sr.description
     assert client.post("/compliance/controls/AC-02/remediate", headers=auth(admin)).status_code == 409
     assert client.post("/compliance/controls/IA-02/remediate", headers=auth(user(db, VIEWER))).status_code == 403
+
+
+def test_access_review_expires_after_interval_not_whole_days(client, db):
+    admin = user(db, ADMIN)
+    db.add(AccessReview(reviewer_id=admin.id, reviewer_email=admin.email, decisions=[], revoked_count=0,
+                        completed_at=now_utc() - timedelta(days=90, hours=1)))
+    db.commit()
+    assert _controls(client, db)["AC-05"]["status"] == "fail"
+
+
+def test_high_risk_signoff_uses_role_at_decision_time(client, db):
+    admin, reviewer = user(db, ADMIN), user(db, REVIEWER)
+    for approver, role_then in ((admin, "reviewer"), (reviewer, "admin")):
+        r = make_refund(db, None, risk=95, status=RefundStatus.approved)
+        r.decided_by_id = approver.id
+        db.add(RefundEvent(refund_id=r.id, actor_id=approver.id, event_type="approved", data={"actor_role": role_then}))
+    db.commit()
+    bad = _controls(client, db)["AC-04"]["evidence"]["approved_without_admin"]
+    refs = {r.decided_by_id: r.reference for r in db.query(RefundRequest).filter(RefundRequest.risk_score == 95)}
+    assert refs[admin.id] in bad and refs[reviewer.id] not in bad
+
+
+def test_security_logging_requires_each_category(client, db):
+    db.query(AuditLog).delete()
+    audit(db, None, user(db, ADMIN), "compliance.evidence_export", "evidence_pack", "x")
+    db.commit()
+    res = compliance.evaluate(db, compliance.BY_ID["AU-01"])
+    assert res["status"] == "warn" and set(res["evidence"]["missing_categories"]) == {"auth", "refund", "customer"}
+
+
+def test_monitoring_flags_failing_controls_without_ticket(client, db, monkeypatch):
+    monkeypatch.setattr(remediation, "enabled", lambda: True)
+    monkeypatch.setattr(remediation, "notify", lambda: None)
+    mn = _controls(client, db)["MN-01"]
+    assert mn["status"] == "warn" and "IA-02" in mn["evidence"]["failing_without_ticket"]
+    admin = user(db, ADMIN)
+    for cid in mn["evidence"]["failing_controls"]:
+        assert client.post(f"/compliance/controls/{cid}/remediate", headers=auth(admin)).status_code == 200
+    assert _controls(client, db)["MN-01"]["status"] == "pass"
+
+
+def test_evidence_pack_omits_free_text_dsr_notes(client, db):
+    db.query(DataSubjectRequest).first().note = "Jane Doe called from jane@example.com"
+    db.commit()
+    res = client.get("/compliance/evidence-pack", headers=auth(user(db, VIEWER)))
+    assert res.json()["data_subject_requests"] and "jane@example.com" not in res.text
+
+
+def test_erasure_redacts_identity_in_refund_descriptions(client, db):
+    dsr = db.query(DataSubjectRequest).one()
+    customer = db.get(Customer, dsr.customer_id)
+    r = db.query(RefundRequest).filter_by(customer_id=customer.id).first()
+    r.description = f"Requested by {customer.name} <{customer.email.upper()}>"
+    db.commit()
+    rid = r.id
+    out = client.post(f"/compliance/dsr/{dsr.id}/fulfil", headers=auth(user(db, ADMIN))).json()
+    db.expire_all()
+    assert db.get(RefundRequest, rid).description == "Requested by [redacted] <[redacted]>"
+    assert out["result"]["refund_descriptions_redacted"] >= 1
+
+
+def test_completed_export_can_be_redelivered(client, db):
+    admin = user(db, ADMIN)
+    dsr_id = client.post("/compliance/dsr", json={"customer_external_id": "cus_1001", "kind": "export"},
+                         headers=auth(admin)).json()["id"]
+    client.post(f"/compliance/dsr/{dsr_id}/fulfil", headers=auth(admin))
+    again = client.post(f"/compliance/dsr/{dsr_id}/fulfil", headers=auth(admin))
+    assert again.status_code == 200 and again.json()["export"]["customer"]["external_id"] == "cus_1001"
+    assert db.query(AuditLog).filter_by(action="compliance.dsr_export_redeliver").count() == 1

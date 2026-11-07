@@ -244,19 +244,25 @@ continuously and evidenced on demand**. The last layer is the Compliance Center 
   controls run live against the database and config on every request (`GET /compliance/controls`) and return
   `pass` / `warn` / `fail` with the evidence they looked at. Examples: segregation of duties (no self-decided
   refunds), delegated limits within the hard cap, admin sign-off on high-risk approvals, quarterly access review,
-  dormant accounts (90 days), MFA, 15-minute session idle timeout (PCI DSS 8.2.8), security-event logging, audit
+  dormant accounts (90 days), MFA, 15-minute session idle timeout (PCI DSS 8.2.8), security-event logging (sign-in,
+  refund-decision and PII-access events must all be present), audit
   hash chain + append-only trigger, 12-month log retention, live PII-masking probe, GDPR request deadlines, and
-  encryption in transit. Infra/process controls (change management, WAF, backups) are `documented` and link to
+  encryption in transit, and continuous monitoring (MN-01 warns while any failing control has no open ticket).
+  High-risk sign-off is judged by the approver's role recorded on the approval event, not their current role.
+  Infra/process controls (change management, WAF, backups) are `documented` and link to
   the files that implement them.
 - **Evidence pack** (`GET /compliance/evidence-pack`): JSON snapshot of every control result, the audit-chain
-  verification, recent access reviews, data-subject requests and the relevant config. The SHA-256 of the file is
+  verification (including the chain `head_hash`), recent access reviews, data-subject requests (without their
+  free-text notes, since viewers can download the pack) and the relevant config. The SHA-256 of the file is
   returned in `X-Evidence-SHA256` and written to the audit log, so the exported file can be matched to the export later.
 - **Tamper-evident audit log** (`GET /compliance/audit-chain`): recomputes the hash chain and reports the first
   broken entry. Rows written before the chain existed are counted as legacy, not verified.
 - **Access review** (`/compliance/access-review`, admin): certify or revoke every active user in one signed-off
   review. Revoking deactivates the account. The review and each revocation are audited, and admins cannot revoke themselves.
 - **Data-subject requests** (`/compliance/dsr`, admin): log GDPR access/erasure requests with a 30-day due date.
-  Export returns the subject's data. Erasure pseudonymises the customer's name and email but keeps refund records,
+  Export returns the subject's data; calling fulfil again on a completed export re-delivers it (audited as
+  `compliance.dsr_export_redeliver`). Erasure pseudonymises the customer's name and email, redacts them from refund
+  descriptions, and keeps the refund records,
   which must be retained for financial record-keeping (GDPR Art. 17(3)(b)).
 - **Fix with Devin** (`POST /compliance/controls/{id}/remediate`, admin): opens a `compliance` ticket that contains the
   control, its framework references, the failing evidence and the expected remediation (deduped while open). With

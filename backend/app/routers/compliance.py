@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import timedelta
 from typing import Literal
 
@@ -59,7 +60,9 @@ def evidence_pack(request: Request, actor: User = Depends(auditors), db: Session
         "scope_note": "Application-layer controls. Infrastructure inherits AWS attestations; the Devin platform "
                       "used to build and operate it is covered by Cognition's own SOC 2 Type II report.",
         "results": compliance.run_all(db), "audit_chain": verify_chain(db),
-        "access_reviews": [_review_out(r) for r in reviews], "data_subject_requests": [_dsr_out(r) for r in dsrs],
+        "access_reviews": [_review_out(r) for r in reviews],
+        # Notes are free text and may identify the subject, so they stay out of the auditor-readable pack.
+        "data_subject_requests": [{k: v for k, v in _dsr_out(r).items() if k != "note"} for r in dsrs],
         "config": {k: getattr(s, k) for k in ("environment", "access_token_minutes", "session_idle_limit_minutes",
                                              "audit_retention_days", "access_review_interval_days",
                                              "dormant_account_days", "dsar_due_days")},
@@ -88,7 +91,7 @@ def remediate_control(control_id: str, request: Request, actor: User = Depends(a
         deny(db, request, actor, "compliance.remediate", "Control is not failing; nothing to remediate", 409, "control", control_id)
     fingerprint = f"compliance:{control_id}"
     sr = db.scalar(select(SupportRequest).where(
-        SupportRequest.fingerprint == fingerprint, SupportRequest.status.in_(["open", "queued", "devin_working"])
+        SupportRequest.fingerprint == fingerprint, SupportRequest.status.in_(compliance.ACTIVE_TICKET_STATUSES)
     ))
     if sr is None or (sr.status == "open" and remediation.enabled()):
         frameworks = "; ".join(f"{fw} {', '.join(refs)}" for fw, refs in control.frameworks.items())
@@ -215,7 +218,8 @@ def fulfil_dsr(request_id: int, request: Request, actor: User = Depends(admin_on
     r = db.get(DataSubjectRequest, request_id)
     if r is None:
         raise HTTPException(status_code=404, detail="Unknown request")
-    if r.status != "open":
+    redeliver = r.status != "open"
+    if redeliver and r.kind != "export":
         raise HTTPException(status_code=409, detail="Request already completed")
     c = r.customer
     refunds = db.scalars(select(RefundRequest).where(RefundRequest.customer_id == c.id).order_by(RefundRequest.id)).unique().all()
@@ -228,12 +232,27 @@ def fulfil_dsr(request_id: int, request: Request, actor: User = Depends(admin_on
                          "currency": x.currency, "reason": x.reason.value, "status": x.status.value,
                          "created_at": x.created_at, "decided_at": x.decided_at} for x in refunds],
         }
+        if redeliver:
+            # A lost response must not leave the subject without their data: regenerate it (audited), keep the record.
+            audit(db, request, actor, "compliance.dsr_export_redeliver", "data_subject_request", r.id,
+                  customer=c.external_id)
+            db.commit()
+            return {**_dsr_out(r), "export": json.loads(json.dumps(export, default=str))}
         r.result = {"records_exported": 1 + len(refunds)}
     else:
         # Art. 17(3)(b): financial records are retained (AML / tax); identity is pseudonymised.
+        identity = [v for v in (c.name, c.email) if v]
+        redacted = 0
+        for x in refunds:
+            text = x.description or ""
+            for v in identity:
+                text = re.sub(re.escape(v), "[redacted]", text, flags=re.IGNORECASE)
+            if text != (x.description or ""):
+                x.description, redacted = text, redacted + 1
         c.name = f"Erased subject {c.external_id}"
         c.email = f"erased+{c.external_id}@redacted.invalid"
-        r.result = {"pseudonymised_fields": ["customer.name", "customer.email"], "refunds_retained": len(refunds),
+        r.result = {"pseudonymised_fields": ["customer.name", "customer.email", "refund.description"],
+                    "refund_descriptions_redacted": redacted, "refunds_retained": len(refunds),
                     "legal_basis_for_retention": "GDPR Art. 17(3)(b) - financial record-keeping obligations"}
     r.status = "completed"
     r.completed_at = now_utc()
