@@ -154,8 +154,29 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 
 - Any user can file `POST /support/requests {title, description, trace_id}`.
 - Every unhandled exception automatically opens an `error` ticket (deduped by exception fingerprint for `REMEDIATION_COOLDOWN_MINUTES`).
-- With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `main`. The session URL is stored on the ticket (`GET /admin/support/requests`).
+- With `DEVIN_API_KEY` set (a legacy `apk_` key uses `POST /v1/sessions`; an org key also needs `DEVIN_ORG_ID` and uses `POST /v3/organizations/{org}/sessions`), error tickets start a Devin session automatically (`AUTO_REMEDIATE_ERRORS`). Support tickets are sent with `POST /admin/support/requests/{id}/remediate` or the **Send to Devin** button. The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `DEVIN_BASE_BRANCH` (default `main`). Each session is capped at `DEVIN_MAX_ACU` (default 10).
+- Admins see every ticket, its status and Devin session link on the **Support tickets** page (`GET /admin/support/requests`, `GET /admin/support/config`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
+
+### Demo (`scripts/demo.sh`)
+
+A repeatable demo on a throwaway `demo` branch, so `main` is never touched:
+
+```bash
+scripts/demo.sh reset     # rebuild `demo` from main + a planted bug (ZeroDivisionError in per-reviewer approval rate), close stale demo PRs
+scripts/demo.sh up        # isolated stack (compose project refunds-demo, fresh DB) with DEVIN_BASE_BRANCH=demo
+scripts/demo.sh trigger   # optional: does steps 2-3 below from the CLI
+scripts/demo.sh status    # tickets + Devin session links
+scripts/demo.sh down
+```
+
+1. Open http://localhost:8080 and sign in as `priya.admin@acmepay.com`.
+2. **Team & limits**: add a reviewer (they have no decisions yet).
+3. **Analytics**: the page fails with a 500; the error shows the trace id.
+4. **Support tickets**: an `error` ticket for the `ZeroDivisionError` is `devin_working`, with a link to the Devin session.
+5. Follow the session to a PR into `demo` with a failing test, the fix and green CI. Run `reset` again to repeat.
+
+To rehearse without spending ACUs, point the backend at a stub: `DEVIN_API_KEY=apk_fake DEVIN_API_URL=http://172.17.0.1:9999 scripts/demo.sh up`.
 
 ## Secrets (`scripts/secrets.sh`)
 

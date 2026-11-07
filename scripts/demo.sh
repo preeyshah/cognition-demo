@@ -66,7 +66,8 @@ cmd_up() {
   [[ -n "${DEVIN_API_KEY:-}" ]] || log "DEVIN_API_KEY not set: tickets will be recorded but not sent to Devin"
   export DEVIN_BASE_BRANCH="$BRANCH" JWT_SECRET="${JWT_SECRET:-demo-$(date +%s)-$RANDOM}"
   (cd "$WT" && docker compose -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1 || true
-   docker compose -p "$PROJECT" up --build -d --wait)
+   log "Building and starting the demo stack (log: .demo/compose.log)"
+   docker compose -p "$PROJECT" up --build -d --wait >compose.log 2>&1 || { tail -20 compose.log; exit 1; })
   log "Demo running from $BRANCH @ $(git -C "$WT" rev-parse --short HEAD): http://localhost:8080 (sign in as $ADMIN)"
   log "Story: Team & limits -> add a reviewer -> Analytics fails with a trace id -> Support tickets -> Open session"
 }
@@ -96,7 +97,8 @@ cmd_status() {
   curl -fsS "$API/admin/support/requests" -H "Authorization: Bearer $t" | python3 -c '
 import json, sys
 for r in json.load(sys.stdin):
-    print(f"#{r[\"id\"]:<3} {r[\"kind\"]:<7} {r[\"status\"]:<18} {r[\"title\"][:60]:<60} {r[\"devin_session_url\"] or r[\"remediation_error\"] or \"\"}")'
+    link = r["devin_session_url"] or r["remediation_error"] or ""
+    print("#{:<3} {:<7} {:<18} {:<60} {}".format(r["id"], r["kind"], r["status"], r["title"][:60], link))'
 }
 
 cmd_down() {
