@@ -164,7 +164,18 @@ def test_security_logging_requires_each_category(client, db):
     audit(db, None, user(db, ADMIN), "compliance.evidence_export", "evidence_pack", "x")
     db.commit()
     res = compliance.evaluate(db, compliance.BY_ID["AU-01"])
-    assert res["status"] == "warn" and set(res["evidence"]["missing_categories"]) == {"auth", "refund", "customer"}
+    assert res["status"] == "warn" and set(res["evidence"]["missing_categories"]) == {"sign-in", "refund decision", "PII access"}
+    admin = user(db, ADMIN)
+    audit(db, None, admin, "auth.login", "user", admin.id)
+    audit(db, None, admin, "refund.create", "refund", 1)
+    audit(db, None, admin, "customer.history", "customer", "cus_1001", success=False)
+    db.commit()
+    res = compliance.evaluate(db, compliance.BY_ID["AU-01"])
+    assert res["status"] == "warn" and set(res["evidence"]["missing_categories"]) == {"refund decision", "PII access"}
+    audit(db, None, admin, "refund.approve", "refund", 1)
+    audit(db, None, admin, "customer.history", "customer", "cus_1001")
+    db.commit()
+    assert compliance.evaluate(db, compliance.BY_ID["AU-01"])["status"] == "pass"
 
 
 def test_monitoring_flags_failing_controls_without_ticket(client, db, monkeypatch):
@@ -189,12 +200,13 @@ def test_erasure_redacts_identity_in_refund_descriptions(client, db):
     dsr = db.query(DataSubjectRequest).one()
     customer = db.get(Customer, dsr.customer_id)
     r = db.query(RefundRequest).filter_by(customer_id=customer.id).first()
-    r.description = f"Requested by {customer.name} <{customer.email.upper()}>"
+    first = customer.name.split()[0]
+    r.description = f"Requested by {customer.name} <{customer.email.upper()}>; {first}{first.lower()}x unchanged"
     db.commit()
     rid = r.id
     out = client.post(f"/compliance/dsr/{dsr.id}/fulfil", headers=auth(user(db, ADMIN))).json()
     db.expire_all()
-    assert db.get(RefundRequest, rid).description == "Requested by [redacted] <[redacted]>"
+    assert db.get(RefundRequest, rid).description == f"Requested by [redacted] <[redacted]>; {first}{first.lower()}x unchanged"
     assert out["result"]["refund_descriptions_redacted"] >= 1
 
 

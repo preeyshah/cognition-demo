@@ -165,8 +165,12 @@ def check_session_timeout(_: Session) -> Result:
     return Result("pass", f"Sessions expire after {s.access_token_minutes} min", ev)
 
 
-# auth = sign-ins / MFA, refund = money-movement decisions, customer = PII access (customer history lookups).
-REQUIRED_LOG_CATEGORIES = ("auth", "refund", "customer")
+# Successful events of each kind must be in the log; a denied attempt or a refund.create is not a decision.
+REQUIRED_LOG_EVENTS = {
+    "sign-in": ("auth.login",),
+    "refund decision": ("refund.approve", "refund.reject", "refund.escalate"),
+    "PII access": ("customer.history",),
+}
 
 
 def check_security_logging(db: Session) -> Result:
@@ -182,7 +186,8 @@ def check_security_logging(db: Session) -> Result:
         denied += 0 if ok else n
     ev = {"window_days": 30, "events_by_category": dict(by_cat), "denied_attempts": denied}
     total = sum(by_cat.values())
-    missing = [c for c in REQUIRED_LOG_CATEGORIES if not by_cat.get(c)]
+    succeeded = {action for action, ok, _ in rows if ok}
+    missing = [kind for kind, actions in REQUIRED_LOG_EVENTS.items() if not succeeded.intersection(actions)]
     ev["missing_categories"] = missing
     if missing:
         return Result("warn", f"No {', '.join(missing)} events recorded in the last 30 days", ev)

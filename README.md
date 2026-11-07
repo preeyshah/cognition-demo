@@ -244,7 +244,7 @@ continuously and evidenced on demand**. The last layer is the Compliance Center 
   controls run live against the database and config on every request (`GET /compliance/controls`) and return
   `pass` / `warn` / `fail` with the evidence they looked at. Examples: segregation of duties (no self-decided
   refunds), delegated limits within the hard cap, admin sign-off on high-risk approvals, quarterly access review,
-  dormant accounts (90 days), MFA, 15-minute session idle timeout (PCI DSS 8.2.8), security-event logging (sign-in,
+  dormant accounts (90 days), MFA, 15-minute session idle timeout (PCI DSS 8.2.8), security-event logging (successful sign-in,
   refund-decision and PII-access events must all be present), audit
   hash chain + append-only trigger, 12-month log retention, live PII-masking probe, GDPR request deadlines, and
   encryption in transit, and continuous monitoring (MN-01 warns while any failing control has no open ticket).
