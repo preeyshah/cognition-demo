@@ -8,8 +8,10 @@
 #   ./setup.sh down                  Stop the local stack and delete its volume
 set -euo pipefail
 cd "$(dirname "$0")"
+if [[ -f .env ]]; then set -a; . ./.env; set +a; fi  # same overrides Compose reads
+pg_pw() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${POSTGRES_PASSWORD:-refunds}"; }
 
-LOCAL_URL="postgresql+psycopg://refunds:refunds@db:5432/refunds"  # the Compose Postgres
+LOCAL_URL="postgresql+psycopg://refunds:$(pg_pw)@db:5432/refunds"  # the Compose Postgres
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null || die "missing '$1' ($2)"; }
@@ -61,7 +63,7 @@ case "$cmd" in
     log "Starting Postgres 16, API, mock provider and UI"
     docker compose up -d --build
     wait_http http://localhost:8000/health
-    log "Ready: UI http://localhost:8080  API http://localhost:8000/docs  DB $LOCAL_URL"
+    log "Ready: UI http://localhost:8080  API http://localhost:8000/docs  DB postgres://refunds@localhost:${DB_PORT:-5433}/refunds"
     ;;
   external)
     need docker "https://docs.docker.com/get-docker/"
@@ -79,7 +81,7 @@ case "$cmd" in
     if [[ -z "$url" ]]; then
       need docker "or pass a Postgres URL"
       docker compose up -d --wait db  # same database that `./setup.sh inspect` reads
-      url="postgresql+psycopg://refunds:${POSTGRES_PASSWORD:-refunds}@localhost:${DB_PORT:-5433}/refunds"
+      url="postgresql+psycopg://refunds:$(pg_pw)@localhost:${DB_PORT:-5433}/refunds"
     else
       url="$(normalize_url "$url")"
     fi
