@@ -15,7 +15,7 @@ _rc_plain="$_rc_dir/secrets.env"
 _rc_enc="$_rc_dir/secrets.env.gpg"
 _rc_keys=(DEVIN_API_KEY DEVIN_ORG_ID JWT_SECRET PROVIDER_API_KEY POSTGRES_PASSWORD DATABASE_URL)
 # Secrets Manager ids -> the JSON keys they hold (matches infra/data.tf)
-_rc_sm_ids=("$_rc_name/devin-api-key" "$_rc_name/app" "$_rc_name/local")
+_rc_sm_ids=("$_rc_name/devin-api-key" "$_rc_name/app")
 
 _rc_log() { printf '\033[1;34m[secrets]\033[0m %s\n' "$*" >&2; }
 
@@ -91,16 +91,11 @@ _rc_init() {
 _rc_push() {
   aws sts get-caller-identity >/dev/null || { _rc_log "no AWS credentials"; return 1; }
   unset _RC_SRC_DEVIN_API_KEY; _rc_load_local
-  [[ -n "${DEVIN_API_KEY:-}" ]] && python3 -c 'import json,os;print(json.dumps({"DEVIN_API_KEY":os.environ["DEVIN_API_KEY"]}),end="")' \
-    | aws secretsmanager put-secret-value --secret-id "$_rc_name/devin-api-key" --secret-string file:///dev/stdin >/dev/null \
-    && _rc_log "DEVIN_API_KEY -> $_rc_name/devin-api-key"
-  local extra
-  extra=$(python3 -c 'import json,os;print(json.dumps({k:os.environ[k] for k in ("DEVIN_ORG_ID",) if os.environ.get(k)}))')
-  if [[ "$extra" != "{}" ]]; then
-    printf '%s' "$extra" | aws secretsmanager create-secret --name "$_rc_name/local" --secret-string file:///dev/stdin >/dev/null 2>&1 \
-      || printf '%s' "$extra" | aws secretsmanager put-secret-value --secret-id "$_rc_name/local" --secret-string file:///dev/stdin >/dev/null
-    _rc_log "DEVIN_ORG_ID -> $_rc_name/local"
-  fi
+  [[ -n "${DEVIN_API_KEY:-}" ]] || { _rc_log "no DEVIN_API_KEY to push"; return 1; }
+  # Key and org id share the secret the ECS task reads (infra/compute.tf), so both reach the API.
+  python3 -c 'import json,os;print(json.dumps({k:os.environ.get(k,"") for k in ("DEVIN_API_KEY","DEVIN_ORG_ID")}),end="")' \
+    | aws secretsmanager put-secret-value --secret-id "$_rc_name/devin-api-key" --secret-string file:///dev/stdin >/dev/null
+  _rc_log "DEVIN_API_KEY + DEVIN_ORG_ID -> $_rc_name/devin-api-key"
   _rc_log "ECS reads secrets at task start: aws ecs update-service --cluster $_rc_name --service api --force-new-deployment"
 }
 

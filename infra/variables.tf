@@ -30,7 +30,7 @@ variable "api_desired_count" {
 }
 
 variable "devin_org_id" {
-  description = "Devin org id for the self-healing loop (the API key itself lives in Secrets Manager)."
+  description = "Initial Devin org id, stored with the API key in the devin-api-key secret (later updates: scripts/secrets.sh push)."
   type        = string
   default     = ""
 }

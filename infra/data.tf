@@ -89,7 +89,7 @@ resource "aws_secretsmanager_secret" "devin" {
 
 resource "aws_secretsmanager_secret_version" "devin" {
   secret_id     = aws_secretsmanager_secret.devin.id
-  secret_string = jsonencode({ DEVIN_API_KEY = "" })
+  secret_string = jsonencode({ DEVIN_API_KEY = "", DEVIN_ORG_ID = var.devin_org_id })
   lifecycle {
     ignore_changes = [secret_string]
   }

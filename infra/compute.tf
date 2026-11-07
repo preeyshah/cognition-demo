@@ -128,7 +128,6 @@ resource "aws_ecs_task_definition" "api" {
       { name = "ALLOWED_REDIRECT_ORIGINS", value = local.app_origin },
       { name = "CORS_ORIGINS", value = local.app_origin },
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
-      { name = "DEVIN_ORG_ID", value = var.devin_org_id },
       { name = "DEVIN_REPO", value = var.github_repo },
       { name = "DEVIN_MAX_ACU", value = tostring(var.devin_max_acu) },
     ]
@@ -138,6 +137,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_SECRET::" },
       { name = "HISTORY_PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
       { name = "DEVIN_API_KEY", valueFrom = "${aws_secretsmanager_secret.devin.arn}:DEVIN_API_KEY::" },
+      { name = "DEVIN_ORG_ID", valueFrom = "${aws_secretsmanager_secret.devin.arn}:DEVIN_ORG_ID::" },
     ]
     logConfiguration = local.log_config
   })])

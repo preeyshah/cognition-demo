@@ -163,7 +163,7 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=
 never overriding something already exported:
 
 1. the current environment
-2. **AWS Secrets Manager** (`refunds-console/devin-api-key`, `refunds-console/app`, `refunds-console/local`) when AWS credentials work
+2. **AWS Secrets Manager** (`refunds-console/devin-api-key` holds the Devin key + org id, `refunds-console/app`) when AWS credentials work
 3. `~/.config/refunds-console/secrets.env.gpg`: GPG/AES-256, passphrase-protected (outside the repo)
 4. `~/.config/refunds-console/secrets.env`: plaintext fallback; refused unless mode `600` and owned by you
 
