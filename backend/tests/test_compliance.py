@@ -201,12 +201,12 @@ def test_erasure_redacts_identity_in_refund_descriptions(client, db):
     customer = db.get(Customer, dsr.customer_id)
     r = db.query(RefundRequest).filter_by(customer_id=customer.id).first()
     first = customer.name.split()[0]
-    r.description = f"Requested by {customer.name} <{customer.email.upper()}>; {first}{first.lower()}x unchanged"
+    r.description = f"Requested by {customer.name} <{customer.email.upper()}> {customer.name}_2024; {first}{first.lower()}x unchanged"
     db.commit()
     rid = r.id
     out = client.post(f"/compliance/dsr/{dsr.id}/fulfil", headers=auth(user(db, ADMIN))).json()
     db.expire_all()
-    assert db.get(RefundRequest, rid).description == f"Requested by [redacted] <[redacted]>; {first}{first.lower()}x unchanged"
+    assert db.get(RefundRequest, rid).description == f"Requested by [redacted] <[redacted]> [redacted]_2024; {first}{first.lower()}x unchanged"
     assert out["result"]["refund_descriptions_redacted"] >= 1
 
 

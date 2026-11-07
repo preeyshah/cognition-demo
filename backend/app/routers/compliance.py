@@ -241,13 +241,13 @@ def fulfil_dsr(request_id: int, request: Request, actor: User = Depends(admin_on
         r.result = {"records_exported": 1 + len(refunds)}
     else:
         # Art. 17(3)(b): financial records are retained (AML / tax); identity is pseudonymised.
-        # Longest first so the email goes before a name inside it; whole-token matches only ("Ann" != "annual").
+        # Longest first so the email goes before a name inside it; not inside a longer word ("Ann" != "annual").
         identity = sorted((v for v in (c.name, c.email) if v), key=len, reverse=True)
         redacted = 0
         for x in refunds:
             text = x.description or ""
             for v in identity:
-                text = re.sub(rf"(?<!\w){re.escape(v)}(?!\w)", "[redacted]", text, flags=re.IGNORECASE)
+                text = re.sub(rf"(?<![^\W_]){re.escape(v)}(?![^\W_])", "[redacted]", text, flags=re.IGNORECASE)
             if text != (x.description or ""):
                 x.description, redacted = text, redacted + 1
         c.name = f"Erased subject {c.external_id}"
