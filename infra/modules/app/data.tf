@@ -3,6 +3,48 @@ resource "aws_kms_key" "app" {
   enable_key_rotation = true
 }
 
+data "aws_caller_identity" "current" {}
+
+# AWS services that use this CMK on our behalf (log groups, RDS storage + managed password,
+# Secrets Manager, Performance Insights, AWS Backup vault, ECR) need explicit key-policy
+# grants — the default policy only delegates to IAM principals in the account.
+data "aws_iam_policy_document" "app_key" {
+  statement {
+    sid       = "EnableIAMUserPermissions"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = {
+      AllowCloudWatchLogs   = "logs.${var.region}.amazonaws.com"
+      AllowSecretsManager   = "secretsmanager.${var.region}.amazonaws.com"
+      AllowRDS              = "rds.${var.region}.amazonaws.com"
+      AllowPerformanceFacts = "pi.${var.region}.amazonaws.com"
+      AllowBackup           = "backup.${var.region}.amazonaws.com"
+      AllowECR              = "ecr.${var.region}.amazonaws.com"
+    }
+    content {
+      sid       = statement.key
+      actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+      resources = ["*"]
+      principals {
+        type        = "Service"
+        identifiers = [statement.value]
+      }
+    }
+  }
+}
+
+resource "aws_kms_key_policy" "app" {
+  key_id = aws_kms_key.app.id
+  policy = data.aws_iam_policy_document.app_key.json
+}
+
 locals {
   # Default Postgres settings; var.db_parameters can override or extend these via PR.
   db_pg_parameters = merge({

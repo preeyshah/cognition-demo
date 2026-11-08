@@ -373,9 +373,10 @@ scripts/db-ops.sh aws-status <rds-id>
 
 Two environments share one module — `infra/modules/app` — instantiated by two thin roots:
 
-- `infra/dev` → state key `refunds-console-dev/terraform.tfstate`, name `refunds-dev`: **minimal** — 1 AZ, no NAT
-  (tasks run in public subnets), no WAF, no autoscaling, no AWS Backup, `db.t4g.micro` single-AZ, 1×256/1024 api +
-  1×256/512 provider Fargate tasks, `ENVIRONMENT=dev` (mock SSO + demo seed on, like docker compose).
+- `infra/dev` → state key `refunds-console-dev/terraform.tfstate`, name `refunds-dev`: **minimal** — subnets in 2 AZs
+  (ALB/RDS requirement) but no NAT (tasks run in public subnets), no WAF, no autoscaling, no AWS Backup,
+  `db.t4g.micro` single-AZ, 1×256/1024 api + 1×256/512 provider Fargate tasks, `ENVIRONMENT=dev` (mock SSO + demo
+  seed on, like docker compose).
 - `infra/prod` → state key `refunds-console/terraform.tfstate`, name `refunds-console`: the full stack below.
   `moved.tf` maps the pre-module state addresses so the first apply updates in place (no recreates).
 
