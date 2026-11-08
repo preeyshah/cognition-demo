@@ -54,7 +54,8 @@ jobs:
         # everything that doesn't depend on it. We don't fail the job on apply errors —
         # the verify steps below report what actually came up.
         working-directory: infra/${{ inputs.environment }}
-        run: terraform apply -input=false -auto-approve -lock-timeout=10m || echo "::warning::terraform apply reported errors (expected: CloudFront account verification)"
+        run: |
+          terraform apply -input=false -auto-approve -lock-timeout=10m || echo "::warning::terraform apply reported errors - CloudFront account verification may still be pending"
       - name: Wait for ECS rollout
         run: |
           CLUSTER=$(terraform -chdir=infra/${{ inputs.environment }} output -raw ecs_cluster)
