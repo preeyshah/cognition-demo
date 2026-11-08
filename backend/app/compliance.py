@@ -18,8 +18,20 @@ from . import policy, remediation
 from .audit import verify_chain
 from .config import get_settings
 from .db import engine
-from .models import AccessReview, AuditLog, DataSubjectRequest, RefundRequest, RefundStatus, Role, User
+from .models import (
+    AccessReview,
+    AuditLog,
+    DataSubjectRequest,
+    RefundEvent,
+    RefundRequest,
+    RefundStatus,
+    Role,
+    SupportRequest,
+    User,
+)
 from .services import aware, get_policies, now_utc, serialize_refund
+
+ACTIVE_TICKET_STATUSES = ("open", "queued", "devin_working")
 
 SOC2, PCI, SOX, GDPR = "SOC 2", "PCI DSS 4.0", "SOX ITGC", "GDPR"
 FRAMEWORKS = [SOC2, PCI, SOX, GDPR]
@@ -86,7 +98,17 @@ def check_high_risk_signoff(db: Session) -> Result:
     approved = db.scalars(
         _decided(db).where(RefundRequest.status == RefundStatus.approved, RefundRequest.risk_score >= threshold)
     ).unique().all()
-    bad = [r.reference for r in approved if r.decided_by is None or r.decided_by.role != Role.admin]
+    # Judge each approval by the approver's role when they decided (recorded on the event), not their role today.
+    role_at = {rid: (data or {}).get("actor_role") for rid, data in db.execute(
+        select(RefundEvent.refund_id, RefundEvent.data)
+        .where(RefundEvent.event_type == "approved", RefundEvent.refund_id.in_([r.id for r in approved]))
+    ).all()} if approved else {}
+
+    def signed_by_admin(r: RefundRequest) -> bool:
+        role = role_at.get(r.id) or (r.decided_by.role.value if r.decided_by else None)
+        return role == Role.admin.value
+
+    bad = [r.reference for r in approved if not signed_by_admin(r)]
     ev = {"high_risk_threshold": threshold, "high_risk_approvals": len(approved), "approved_without_admin": bad[:50]}
     if bad:
         return Result("fail", f"{len(bad)} high-risk refund(s) approved without admin sign-off", ev)
@@ -101,10 +123,11 @@ def check_access_review(db: Session) -> Result:
     ev = {"interval_days": days, "last_review": None}
     if last is None:
         return Result("fail", f"No user access review on record (required every {days} days)", ev)
-    age = (now_utc() - aware(last.completed_at)).days
+    elapsed = now_utc() - aware(last.completed_at)
+    age = elapsed.days
     ev["last_review"] = {"id": last.id, "completed_at": last.completed_at.isoformat(), "reviewer": last.reviewer_email,
                          "users_reviewed": len(last.decisions or []), "revoked": last.revoked_count, "age_days": age}
-    if age > days:
+    if elapsed > timedelta(days=days):
         return Result("fail", f"Last access review was {age} days ago (limit {days})", ev)
     return Result("pass", f"Access recertified {age} day(s) ago by {last.reviewer_email}", ev)
 
@@ -142,6 +165,14 @@ def check_session_timeout(_: Session) -> Result:
     return Result("pass", f"Sessions expire after {s.access_token_minutes} min", ev)
 
 
+# Successful events of each kind must be in the log; a denied attempt or a refund.create is not a decision.
+REQUIRED_LOG_EVENTS = {
+    "sign-in": ("auth.login",),
+    "refund decision": ("refund.approve", "refund.reject"),  # escalation leaves the refund undecided
+    "PII access": ("customer.history",),
+}
+
+
 def check_security_logging(db: Session) -> Result:
     since = now_utc() - timedelta(days=30)
     rows = db.execute(
@@ -155,8 +186,11 @@ def check_security_logging(db: Session) -> Result:
         denied += 0 if ok else n
     ev = {"window_days": 30, "events_by_category": dict(by_cat), "denied_attempts": denied}
     total = sum(by_cat.values())
-    if not total:
-        return Result("warn", "No security events recorded in the last 30 days", ev)
+    succeeded = {action for action, ok, _ in rows if ok}
+    missing = [kind for kind, actions in REQUIRED_LOG_EVENTS.items() if not succeeded.intersection(actions)]
+    ev["missing_categories"] = missing
+    if missing:
+        return Result("warn", f"No {', '.join(missing)} events recorded in the last 30 days", ev)
     return Result("pass", f"{total} security events in 30 days ({denied} denied attempts), incl. logins, decisions, PII access", ev)
 
 
@@ -225,12 +259,21 @@ def check_encryption(_: Session) -> Result:
     return Result("pass", "TLS to the database and browser (HSTS); storage encrypted with KMS", ev)
 
 
-def check_continuous_monitoring(_: Session) -> Result:
+def check_continuous_monitoring(db: Session) -> Result:
     on = remediation.enabled()
-    ev = {"devin_remediation_enabled": on, "repo": get_settings().devin_repo, "base_branch": get_settings().devin_base_branch}
+    failing = [c.id for c in CONTROLS if c.check and c.check is not check_continuous_monitoring
+               and evaluate(db, c)["status"] == "fail"]
+    tracked = set(db.scalars(select(SupportRequest.fingerprint).where(
+        SupportRequest.kind == "compliance", SupportRequest.status.in_(ACTIVE_TICKET_STATUSES)
+    )).all())
+    untracked = [cid for cid in failing if f"compliance:{cid}" not in tracked]
+    ev = {"devin_remediation_enabled": on, "repo": get_settings().devin_repo, "base_branch": get_settings().devin_base_branch,
+          "failing_controls": failing, "failing_without_ticket": untracked}
     if not on:
         return Result("warn", "Failing controls are ticketed, but DEVIN_API_KEY is not set so no fix PR is opened automatically", ev)
-    return Result("pass", "Failing controls open a ticket that Devin turns into a reviewed PR", ev)
+    if untracked:
+        return Result("warn", f"{len(untracked)} failing control(s) have no open remediation ticket: {', '.join(untracked)}", ev)
+    return Result("pass", "Every failing control has an open ticket that Devin turns into a reviewed PR", ev)
 
 
 CONTROLS: list[Control] = [

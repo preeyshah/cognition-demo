@@ -189,7 +189,7 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
         refund.decided_at = now_utc()
         refund.decision_note = note
     _event(db, refund, user, action + ("d" if action.endswith("e") else "ed"), previous, note,
-           amount_cents=refund.amount_cents)
+           amount_cents=refund.amount_cents, actor_role=user.role.value)
     payout = payouts.enqueue(db, refund, user) if action == "approve" else None
     audit(db, request, user, f"refund.{action}", "refund", refund.id, amount_cents=refund.amount_cents,
           from_status=previous.value, to_status=refund.status.value)
