@@ -151,7 +151,7 @@ def export_refunds(request: Request, actor: User = Depends(admin_only), db: Sess
         w.writerow([r.reference, r.created_at.isoformat(), r.status.value, r.amount_cents, r.currency, r.reason.value,
                     r.risk_score, r.customer.external_id, r.assigned_to.email if r.assigned_to else "",
                     r.decided_by.email if r.decided_by else "", r.decided_at.isoformat() if r.decided_at else "",
-                    r.escalated_by.email if r.escalated_by else "", r.escalation_reason or ""])
+                    r.escalated_by.email if r.escalated_by else "", r.escalation_reason.strip()])
     audit(db, request, actor, "export.refunds", rows=len(rows))
     db.commit()
     buf.seek(0)
