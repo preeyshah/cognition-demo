@@ -60,8 +60,8 @@ module "app" {
 
   # Any CloudFront distribution may serve the SPA; keeps api tasks independent of the
   # distribution resource so they deploy even while CloudFront creation is blocked.
-  allowed_redirect_origins = "https://*.cloudfront.net"
-  cors_origins             = "https://*.cloudfront.net"
+  allowed_redirect_origins = "https://*.cloudfront.net,http://localhost:8080,http://localhost:5173"
+  cors_origins             = "https://*.cloudfront.net,http://localhost:8080,http://localhost:5173"
 
   vpc_cidr                 = "10.50.0.0/16"
   az_count                 = 2 # ALB + RDS subnet groups require 2 AZs; everything else stays single-AZ
