@@ -167,7 +167,7 @@ resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   default_root_object = "index.html"
   price_class         = "PriceClass_100"
-  web_acl_id          = aws_wafv2_web_acl.edge.arn
+  web_acl_id          = var.enable_waf ? aws_wafv2_web_acl.edge[0].arn : null
   comment             = var.name
 
   origin {

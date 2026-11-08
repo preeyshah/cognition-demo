@@ -54,9 +54,9 @@ resource "aws_db_instance" "main" {
   monitoring_interval                   = 60
   monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
   performance_insights_retention_period = 7
-  deletion_protection                   = true
-  skip_final_snapshot                   = false
-  final_snapshot_identifier             = "${var.name}-final"
+  deletion_protection                   = var.db_deletion_protection
+  skip_final_snapshot                   = var.db_skip_final_snapshot
+  final_snapshot_identifier             = var.db_skip_final_snapshot ? null : "${var.name}-final"
   performance_insights_enabled          = true
   performance_insights_kms_key_id       = aws_kms_key.app.arn
   enabled_cloudwatch_logs_exports       = ["postgresql"]

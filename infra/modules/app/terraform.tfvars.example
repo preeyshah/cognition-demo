@@ -32,3 +32,13 @@
 # waf_rate_limit_per_5min   = 1000
 # alert_email               = "oncall@example.com"
 # dr_region                 = "us-west-2"
+
+# --- Environment sizing (the dev root sets these small; prod keeps defaults) ----
+# az_count                 = 2        # AZs for subnets/NAT
+# enable_nat_gateway       = true     # NAT for private subnets (~$32/mo)
+# tasks_in_public_subnets  = false    # run ECS tasks publicly (pair with no NAT, dev only)
+# enable_waf               = true     # CloudFront WAF web ACL
+# enable_autoscaling       = true     # api target-tracking policies
+# enable_backup            = true     # AWS Backup plans + cross-region copy
+# db_deletion_protection   = true
+# db_skip_final_snapshot   = false
