@@ -1,3 +1,4 @@
+import re
 import secrets
 from functools import lru_cache
 from urllib.parse import quote
@@ -6,6 +7,24 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEMO_WEBHOOK_SECRET = "whsec_demo_only"
+
+
+def origin_pattern_regex(pattern: str) -> str | None:
+    """Regex for wildcard origin patterns like ``https://*.cloudfront.net``; None for exact origins.
+
+    ``*`` matches any run of non-``/`` characters, so ``https://*.cloudfront.net`` accepts
+    ``https://d123.cloudfront.net`` but not ``https://cloudfront.net`` or ``https://x.cloudfront.net.evil.com``.
+    """
+    if "*" not in pattern:
+        return None
+    return "^" + "[^/]*".join(re.escape(p) for p in pattern.split("*")) + "$"
+
+
+def origin_allowed(origin: str, patterns: list[str]) -> bool:
+    return any(
+        origin == p or (rx := origin_pattern_regex(p)) is not None and re.match(rx, origin)
+        for p in patterns
+    )
 
 
 class Settings(BaseSettings):

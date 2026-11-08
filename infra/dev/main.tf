@@ -58,6 +58,11 @@ module "app" {
   region      = var.region
   environment = "dev" # mock SSO + demo seed enabled, like docker compose
 
+  # Any CloudFront distribution may serve the SPA; keeps api tasks independent of the
+  # distribution resource so they deploy even while CloudFront creation is blocked.
+  allowed_redirect_origins = "https://*.cloudfront.net"
+  cors_origins             = "https://*.cloudfront.net"
+
   vpc_cidr                 = "10.50.0.0/16"
   az_count                 = 2 # ALB + RDS subnet groups require 2 AZs; everything else stays single-AZ
   enable_nat_gateway       = false

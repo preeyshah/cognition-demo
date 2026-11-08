@@ -58,6 +58,11 @@ module "app" {
   name   = var.name
   region = var.region
 
+  # Same wildcard as dev so api tasks don't depend on the distribution existing; tighten to
+  # the exact origin (or a custom domain) once CloudFront is verified and stable.
+  allowed_redirect_origins = "https://*.cloudfront.net"
+  cors_origins             = "https://*.cloudfront.net"
+
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1

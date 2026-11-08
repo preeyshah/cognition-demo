@@ -129,8 +129,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "HISTORY_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
       { name = "PAYMENTS_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
       { name = "PAYMENTS_SANDBOX_CONTROLS", value = "true" }, # mock provider only; set false with a real PSP
-      { name = "ALLOWED_REDIRECT_ORIGINS", value = local.app_origin },
-      { name = "CORS_ORIGINS", value = local.app_origin },
+      { name = "ALLOWED_REDIRECT_ORIGINS", value = var.allowed_redirect_origins },
+      { name = "CORS_ORIGINS", value = var.cors_origins },
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
       { name = "ENVIRONMENT", value = var.environment },
       { name = "DEVIN_REPO", value = var.github_repo },
