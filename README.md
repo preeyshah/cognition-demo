@@ -197,7 +197,7 @@ cd frontend && npm run test:e2e # Playwright end-to-end (see below)
 ```
 
 **End-to-end tests** ([`frontend/e2e/`](frontend/e2e/)): Playwright specs covering the full mock-SSO + 2FA login,
-the reviewer approve/reject/history workflow, admin surfaces and viewer restrictions. They run against a live
+the reviewer approve/reject/history workflow, admin partial refunds, admin surfaces and viewer restrictions. They run against a live
 stack — bring it up first (`docker compose up -d --build`, or `npm run dev` + backend on :8000), then:
 
 ```bash
