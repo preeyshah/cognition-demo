@@ -57,7 +57,11 @@ def test_partial_amount_cannot_exceed_requested(client, db):
     res = client.post(f"/refunds/{r.id}/approve", headers=auth(a), json={"amount_cents": 20_001})
     assert res.status_code == 403
     assert "cannot exceed the requested amount" in res.json()["detail"]
-    assert client.post(f"/refunds/{r.id}/approve", headers=auth(a), json={"amount_cents": 0}).status_code == 422
+    for bad in (0, -500):
+        res = client.post(f"/refunds/{r.id}/approve", headers=auth(a), json={"amount_cents": bad})
+        assert res.status_code == 403
+        assert "must be positive" in res.json()["detail"]
+    assert db.query(AuditLog).filter_by(action="refund.approve", entity_id=str(r.id), success=False).count() == 3
 
 
 def test_partial_approval_does_not_bypass_limits(client, db):

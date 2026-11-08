@@ -114,7 +114,8 @@ class RefundList(BaseModel):
 class DecisionIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
     # Approve only: refund less than requested (partial refund, admins only). Omit to refund in full.
-    amount_cents: int | None = Field(default=None, gt=0)
+    # Range is enforced (and denials audited) by policy.check_approve.
+    amount_cents: int | None = None
 
 
 class AssignIn(BaseModel):
