@@ -42,7 +42,7 @@ jobs:
         run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=$AWS_REGION"
       - name: Create ECR repo on first deploy
         working-directory: infra/${{ inputs.environment }}
-        run: terraform apply -input=false -auto-approve -lock-timeout=10m -target=aws_ecr_repository.backend
+        run: terraform apply -input=false -auto-approve -lock-timeout=10m -target=module.app.aws_ecr_repository.backend
       - name: Build + push backend image
         run: |
           REPO=$(terraform -chdir=infra/${{ inputs.environment }} output -raw ecr_repository_url)
