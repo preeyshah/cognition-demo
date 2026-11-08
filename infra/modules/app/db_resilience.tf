@@ -39,6 +39,36 @@ resource "aws_kms_key" "dr" {
   enable_key_rotation = true
 }
 
+# The DR vault's key must let AWS Backup in the DR region use it (default policy is IAM-only).
+data "aws_iam_policy_document" "dr_key" {
+  count = var.enable_backup ? 1 : 0
+  statement {
+    sid       = "EnableIAMUserPermissions"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+  statement {
+    sid       = "AllowBackup"
+    actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["backup.${var.dr_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_kms_key_policy" "dr" {
+  count    = var.enable_backup ? 1 : 0
+  provider = aws.dr
+  key_id   = aws_kms_key.dr[0].id
+  policy   = data.aws_iam_policy_document.dr_key[0].json
+}
+
 resource "aws_backup_vault" "primary" {
   count       = var.enable_backup ? 1 : 0
   name        = "${var.name}-primary"

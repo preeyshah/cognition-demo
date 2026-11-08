@@ -1,6 +1,6 @@
-# Minimal dev environment: single AZ, no NAT (tasks run in public subnets), one small
-# Fargate task each, db.t4g.micro single-AZ, no WAF/autoscaling/AWS Backup, no deletion
-# protection. Same architecture as prod — CloudFront + S3 + ALB + ECS + RDS.
+# Minimal dev environment: 2 AZs of subnets (ALB + RDS subnet groups require it) but no NAT
+# (tasks run in public subnets), one small Fargate task each, db.t4g.micro single-AZ, no
+# WAF/autoscaling/AWS Backup, no deletion protection. Same architecture as prod.
 #
 # Init:
 #   terraform init -backend-config="bucket=<state bucket>" -backend-config="region=us-east-1"
@@ -59,7 +59,7 @@ module "app" {
   environment = "dev" # mock SSO + demo seed enabled, like docker compose
 
   vpc_cidr                 = "10.50.0.0/16"
-  az_count                 = 1
+  az_count                 = 2 # ALB + RDS subnet groups require 2 AZs; everything else stays single-AZ
   enable_nat_gateway       = false
   tasks_in_public_subnets  = true
   enable_waf               = false
