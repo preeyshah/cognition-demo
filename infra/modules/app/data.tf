@@ -23,7 +23,7 @@ data "aws_iam_policy_document" "app_key" {
     for_each = {
       AllowCloudWatchLogs = "logs.${var.region}.amazonaws.com"
       AllowSecretsManager = "secretsmanager.${var.region}.amazonaws.com"
-      AllowRDS            = "rds.${var.region}.amazonaws.com"
+      AllowRDS            = "rds.amazonaws.com" # RDS uses the global service principal, not regional
       AllowBackup         = "backup.${var.region}.amazonaws.com"
     }
     content {
