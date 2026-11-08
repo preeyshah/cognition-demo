@@ -367,7 +367,7 @@ scripts/db-ops.sh aws-status <rds-id>
 - `.github/workflows/dev.yml` (push to `dev`): CI, then the docker-compose dev deploy + smoke test above, plus an AWS deploy of the `dev` environment when `AWS_DEPLOY_ENABLED=true`.
 - `.github/workflows/infra-plan.yml` (PRs touching `infra/`): `terraform plan` for both `infra/dev` and `infra/prod` against real AWS state, posted to the job summary. Enable by setting the repo variable `AWS_DEPLOY_ENABLED=true` (see below).
 - `.github/workflows/deploy-env.yml` (reusable): builds/pushes the image to ECR, `terraform apply`s the given environment root with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`.
-- `.github/workflows/deploy.yml` (push to `main` only): reruns CI, then deploys `infra/prod` (`ENVIRONMENT=prod`: mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ENABLED=true` is set.
+- `.github/workflows/deploy.yml` (**manual only** — Actions → Deploy → Run workflow): reruns CI, then deploys `infra/prod` (`ENVIRONMENT=prod`: mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ENABLED=true` is set.
 
 ## AWS infrastructure (`infra/`, Terraform)
 
