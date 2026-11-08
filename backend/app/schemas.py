@@ -39,6 +39,7 @@ class Permissions(BaseModel):
     can_escalate: bool
     can_view_history: bool
     can_assign: bool
+    can_approve_partial: bool = False
     approve_blocked_reasons: list[str] = []
     escalate_blocked_reasons: list[str] = []
 
@@ -69,6 +70,7 @@ class RefundOut(BaseModel):
     reference: str
     order_id: str
     amount_cents: int
+    approved_amount_cents: int | None = None
     currency: str
     reason: RefundReason
     description: str
@@ -111,6 +113,10 @@ class RefundList(BaseModel):
 
 class DecisionIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+
+
+class ApproveIn(DecisionIn):
+    amount_cents: int | None = Field(default=None, gt=0)  # omit (or send the requested amount) for a full refund
 
 
 class AssignIn(BaseModel):

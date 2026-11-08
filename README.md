@@ -8,7 +8,7 @@ screens, approvals, connectors and analytics.
 | Power Apps capability | How it's done here |
 | --- | --- |
 | Role-based screens | One React app; navigation, data and buttons change per role (admin / reviewer / viewer) |
-| Approval workflows | Approve / reject / escalate with notes, per-refund + daily limits, admin sign-off for escalations |
+| Approval workflows | Approve / reject / escalate with notes, per-refund + daily limits, admin sign-off for escalations, admin-only partial refunds |
 | Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`, dev only) → swap in Okta / Entra / Google with config |
 | Dataverse tables | PostgreSQL schema via SQLAlchemy models, constraints and indexes |
 | Connectors | Authenticated HTTP client to a third-party "PayCore" customer-history API (mocked, with API key) |
@@ -42,6 +42,10 @@ screens, approvals, connectors and analytics.
 - *Analytics*: KPIs, daily volume vs refunded $, status mix, reason breakdown, approval rate by risk band, top
   customers, team performance; 7/30/90-day windows; CSV export.
 - *Escalations*: queue of reviewer- and policy-escalated refunds that only admins can decide.
+- **Partial refunds**: when approving, admins can tick *Partial refund* and enter a smaller amount (with a note of at
+  least `min_note_length` characters). The payout moves only the approved amount; the drawer and tables show
+  "$x approved of $y". API: `POST /refunds/{id}/approve {amount_cents, note}` — reviewers get `403 Only admins can
+  approve partial refunds` (audited), and every limit/hard cap is still checked against the full requested amount.
 - *All refunds*: search/filter/sort everything, create refunds, (re)assign to reviewers.
 - *Team & limits*: add users, change roles, per-refund and daily approval limits, deactivate.
 - *Policies*: org hard cap, high-risk threshold, customer 30-day cap, min note length, SLA hours.
@@ -109,6 +113,9 @@ To use a real PSP, swap the three functions in `payments_client.py` and the sign
 - **Four-eyes**: nobody can decide a refund they requested; can't be assigned one either.
 - **State machine**: only `pending`/`escalated` can be decided; escalated → admin only.
 - **Notes**: reject/escalate require a justification (min length policy).
+- **Partial refunds**: only admins may approve less than the requested amount (more than zero, note required);
+  limits and the hard cap are evaluated on the full requested amount, and the approved amount is what counts toward
+  daily limits, the customer 30-day cap and analytics.
 - **Admin safety**: admins can't demote/deactivate themselves; viewers can't be assignees.
 - **PII**: viewer responses mask customer name/email.
 - **Audit**: every decision, denial, assignment, history lookup, policy/user change and login is written to
@@ -127,7 +134,7 @@ backend/   FastAPI + SQLAlchemy 2 + PostgreSQL 16, JWT auth            :8000  (O
 backend/mock_provider/  stand-in third-party customer-history API      :9000
 ```
 
-Tables: `users`, `customers`, `refund_requests` (status, reason, risk, amounts, SLA, assignee/escalator/decider),
+Tables: `users`, `customers`, `refund_requests` (status, reason, risk, requested + approved amounts, SLA, assignee/escalator/decider),
 `refund_events` (lifecycle timeline), `audit_log` (append-only), `policy_settings`, `request_traces` (per-request
 traceability), `support_requests` (support/error/guardrail/compliance tickets for remediation), `access_reviews`
 (completed user-access recertifications) and `data_subject_requests` (GDPR export/erasure requests). Postgres BI views

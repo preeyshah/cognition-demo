@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { api, type Refund, type Status } from '../api'
+import { api, isPartial, type Refund, type Status } from '../api'
 import { humanize, money, timeAgo } from '../format'
 import { AssignModal, DecisionModal, HistoryModal, type Action } from './RefundActions'
 import { RefundDrawer } from './RefundDrawer'
@@ -139,7 +139,7 @@ export function RefundTable({
                     <td><div className="ref">{r.reference}</div><div className="sub">{r.order_id}</div></td>
                     <td><div>{r.customer.name}</div><div className="sub">{r.customer.external_id} · {r.customer.country}</div></td>
                     <td>{humanize(r.reason)}</td>
-                    <td className="num"><b>{money(r.amount_cents)}</b></td>
+                    <td className="num"><b>{money(r.amount_cents)}</b>{isPartial(r) ? <div className="sub">{money(r.approved_amount_cents)} approved</div> : null}</td>
                     <td><RiskBadge score={r.risk_score} /></td>
                     <td><StatusBadge status={r.status} />{r.payout ? <div style={{ marginTop: 4 }}><PayoutBadge payout={r.payout} /></div> : null}</td>
                     <td className="sub">{r.decided_by?.name ?? r.assigned_to?.name ?? (r.status === 'escalated' ? 'Admin queue' : '—')}</td>

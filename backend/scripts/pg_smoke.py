@@ -57,4 +57,6 @@ with SessionLocal() as db:
 with engine.connect() as conn:
     n = conn.execute(text("select count(*) from refund_requests")).scalar_one()
     assert n > 100, n
+    # Partial refunds: column + BI view columns exist (ALTER ... IF NOT EXISTS for pre-existing databases).
+    conn.execute(text("select approved_amount_cents, is_partial from v_refund_facts limit 1")).all()
 print("postgres smoke ok:", n, "refunds")

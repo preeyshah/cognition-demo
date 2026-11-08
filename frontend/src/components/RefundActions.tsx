@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api, type Refund, type User } from '../api'
-import { dateTime, humanize, money } from '../format'
+import { dateTime, humanize, money, toCents } from '../format'
 import { Badge, ErrorBox, Modal, RoleBadge, Spinner, StatusBadge } from './ui'
 
 export type Action = 'approve' | 'reject' | 'escalate'
@@ -14,14 +14,18 @@ const copy: Record<Action, { title: string; cta: string; cls: string; placeholde
 
 export function DecisionModal({ refund, action, onClose, onDone }: { refund: Refund; action: Action; onClose: () => void; onDone: (r: Refund) => void }) {
   const [note, setNote] = useState('')
+  const [partial, setPartial] = useState(false)
+  const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const c = copy[action]
+  const canPartial = action === 'approve' && refund.permissions.can_approve_partial
   const submit = async () => {
     setBusy(true)
     setError(null)
     try {
-      onDone(await api<Refund>(`/refunds/${refund.id}/${action}`, 'POST', { note }))
+      const body = canPartial && partial ? { note, amount_cents: toCents(amount) } : { note }
+      onDone(await api<Refund>(`/refunds/${refund.id}/${action}`, 'POST', body))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -34,7 +38,21 @@ export function DecisionModal({ refund, action, onClose, onDone }: { refund: Ref
       <div className="muted" style={{ marginBottom: 14 }}>
         {refund.customer.name} · {humanize(refund.reason)} · risk {refund.risk_score}
       </div>
-      <textarea autoFocus style={{ width: '100%' }} placeholder={c.placeholder} value={note} onChange={(e) => setNote(e.target.value)} data-testid="decision-note" />
+      {canPartial ? (
+        <div style={{ marginBottom: 12 }}>
+          <label className="row" style={{ gap: 6 }}>
+            <input type="checkbox" checked={partial} onChange={(e) => setPartial(e.target.checked)} data-testid="partial-toggle" />
+            Partial refund (admin only)
+          </label>
+          {partial ? (
+            <label className="field" style={{ marginTop: 8 }}>
+              Amount to refund (USD, less than {money(refund.amount_cents)})
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" data-testid="partial-amount" />
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+      <textarea autoFocus style={{ width: '100%' }} placeholder={canPartial && partial ? 'Why only part of the amount? (required, min 10 chars)' : c.placeholder} value={note} onChange={(e) => setNote(e.target.value)} data-testid="decision-note" />
       <ErrorBox message={error} />
       <p className="muted">Recorded in the refund timeline and the append-only audit log.</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>

@@ -39,9 +39,12 @@ def get_policies(db: Session) -> dict[str, int]:
     return values
 
 
+_approved_amount = func.coalesce(RefundRequest.approved_amount_cents, RefundRequest.amount_cents)
+
+
 def approved_today_cents(db: Session, user_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(func.coalesce(func.sum(_approved_amount), 0)).where(
             RefundRequest.decided_by_id == user_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= start_of_day(),
@@ -51,7 +54,7 @@ def approved_today_cents(db: Session, user_id: int) -> int:
 
 def customer_30d_approved_cents(db: Session, customer_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(func.coalesce(func.sum(_approved_amount), 0)).where(
             RefundRequest.customer_id == customer_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= now_utc() - timedelta(days=30),
@@ -96,17 +99,20 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
     if acting:
         ctx = policy_context(db, user, refund, policies)
         approve = policy.check_approve(user, refund, ctx)
+        partial = (policy.check_approve(user, refund, ctx, refund.amount_cents - 1, "x" * 1000)
+                   if refund.amount_cents > 1 else policy.Decision(False))
         # Note length is validated at submit time; here we only check eligibility.
         reject = policy.check_reject(user, refund, ctx, "x" * 1000)
         escalate = policy.check_escalate(user, refund, ctx, "x" * 1000)
     else:
-        approve = reject = escalate = policy.Decision(False, ["Read-only"])
+        approve = reject = escalate = partial = policy.Decision(False, ["Read-only"])
     history = policy.check_view_history(user, refund)
     return RefundOut(
         id=refund.id,
         reference=refund.reference,
         order_id=refund.order_id,
         amount_cents=refund.amount_cents,
+        approved_amount_cents=refund.approved_amount_cents,
         currency=refund.currency,
         reason=refund.reason,
         description=refund.description,
@@ -136,6 +142,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
             can_escalate=escalate.allowed,
             can_view_history=history.allowed,
             can_assign=user.role == Role.admin and refund.status not in policy.TERMINAL,
+            can_approve_partial=partial.allowed,
             approve_blocked_reasons=[] if approve.allowed else approve.reasons,
             escalate_blocked_reasons=[] if escalate.allowed else escalate.reasons,
         ),

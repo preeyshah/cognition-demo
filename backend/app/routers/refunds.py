@@ -18,6 +18,7 @@ from ..models import (
     User,
 )
 from ..schemas import (
+    ApproveIn,
     AssignIn,
     DecisionIn,
     RefundCreateIn,
@@ -161,20 +162,22 @@ def _dispatch_payout(payout_id: int) -> None:
         payouts.attempt(db, payout_id)
 
 
-def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, user: User, db: Session,
+def _decide(action: str, refund_id: int, body: DecisionIn | ApproveIn, request: Request, user: User, db: Session,
             background: BackgroundTasks | None = None) -> RefundOut:
     refund = _load_visible(db, request, user, refund_id, lock=True)
     ctx = policy_context(db, user, refund)
+    amount = getattr(body, "amount_cents", None)
     if action == "approve":
-        decision = policy.check_approve(user, refund, ctx)
+        decision = policy.check_approve(user, refund, ctx, amount, body.note)
     elif action == "reject":
         decision = policy.check_reject(user, refund, ctx, body.note)
     else:
         decision = policy.check_escalate(user, refund, ctx, body.note)
     if not decision.allowed:
+        extra = {"approve_amount_cents": amount} if amount is not None else {}
         deny(
             db, request, user, f"refund.{action}", decision.message, 403, "refund", refund.id,
-            amount_cents=refund.amount_cents, reasons=decision.reasons,
+            amount_cents=refund.amount_cents, reasons=decision.reasons, **extra,
         )
     previous = refund.status
     note = (body.note or "").strip() or None
@@ -188,11 +191,15 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
         refund.decided_by_id = user.id
         refund.decided_at = now_utc()
         refund.decision_note = note
+    extra = {}
+    if action == "approve":
+        refund.approved_amount_cents = amount if amount is not None else refund.amount_cents
+        extra = {"approved_amount_cents": refund.approved_amount_cents, "partial": policy.is_partial(refund, amount)}
     _event(db, refund, user, action + ("d" if action.endswith("e") else "ed"), previous, note,
-           amount_cents=refund.amount_cents, actor_role=user.role.value)
+           amount_cents=refund.amount_cents, actor_role=user.role.value, **extra)
     payout = payouts.enqueue(db, refund, user) if action == "approve" else None
     audit(db, request, user, f"refund.{action}", "refund", refund.id, amount_cents=refund.amount_cents,
-          from_status=previous.value, to_status=refund.status.value)
+          from_status=previous.value, to_status=refund.status.value, **extra)
     db.commit()
     if payout is not None and background is not None:
         background.add_task(_dispatch_payout, payout.id)
@@ -201,7 +208,7 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
 
 
 @router.post("/{refund_id}/approve", response_model=RefundOut)
-def approve(refund_id: int, body: DecisionIn, request: Request, background: BackgroundTasks,
+def approve(refund_id: int, body: ApproveIn, request: Request, background: BackgroundTasks,
             user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _decide("approve", refund_id, body, request, user, db, background)
 

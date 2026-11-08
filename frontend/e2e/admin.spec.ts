@@ -24,6 +24,21 @@ test.describe('admin surfaces', () => {
     await expect(page.getByText('auth.login').first()).toBeVisible({ timeout: 10_000 })
   })
 
+  test('can approve a partial refund on an escalated refund', async ({ page }) => {
+    await page.getByRole('link', { name: 'Escalations' }).click()
+    const approveBtn = page.locator('[data-testid^="approve-"]:not([disabled])').first()
+    await expect(approveBtn).toBeVisible()
+    const ref = (await approveBtn.getAttribute('data-testid'))!.replace('approve-', '')
+    await approveBtn.click()
+    await page.getByTestId('partial-toggle').check()
+    await page.getByTestId('partial-amount').fill('1.00')
+    await page.getByTestId('decision-note').fill('Customer kept part of the order.')
+    await page.getByTestId('decision-confirm').click()
+    await expect(page.getByTestId('decision-confirm')).toHaveCount(0)
+    await page.getByRole('link', { name: 'All refunds' }).click()
+    await expect(page.locator(`[data-testid="row-${ref}"]`)).toContainText('$1.00 approved')
+  })
+
   test('view-as previews another user read-only', async ({ page }) => {
     await page.getByRole('link', { name: 'View as' }).click()
     await page.getByRole('button', { name: /Vik Mehta/ }).click()

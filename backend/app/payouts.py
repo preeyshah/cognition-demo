@@ -54,10 +54,10 @@ def base_key(refund: RefundRequest) -> str:
 
 def enqueue(db: Session, refund: RefundRequest, actor: User) -> Payout:
     """Called inside the approval transaction: the approval and the payout intent commit together."""
-    payout = Payout(refund=refund, idempotency_key=base_key(refund), amount_cents=refund.amount_cents,
+    payout = Payout(refund=refund, idempotency_key=base_key(refund), amount_cents=refund.refunded_cents,
                     currency=refund.currency, status=PayoutStatus.queued, next_attempt_at=now_utc())
     db.add(payout)
-    _event(db, payout, "payout_queued", f"Refund of {refund.amount_cents / 100:,.2f} {refund.currency} queued at PayCore",
+    _event(db, payout, "payout_queued", f"Refund of {refund.refunded_cents / 100:,.2f} {refund.currency} queued at PayCore",
            actor, idempotency_key=payout.idempotency_key)
     return payout
 

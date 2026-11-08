@@ -25,6 +25,7 @@ export interface Permissions {
   can_escalate: boolean
   can_view_history: boolean
   can_assign: boolean
+  can_approve_partial: boolean
   approve_blocked_reasons: string[]
   escalate_blocked_reasons: string[]
 }
@@ -50,6 +51,9 @@ export interface Payout {
   updated_at: string
 }
 
+export const isPartial = (r: { amount_cents: number; approved_amount_cents: number | null }) =>
+  r.approved_amount_cents != null && r.approved_amount_cents < r.amount_cents
+
 export const payoutInFlight = (p: Payout | null | undefined) => !!p && p.status !== 'succeeded' && p.status !== 'failed'
 
 export interface Refund {
@@ -57,6 +61,7 @@ export interface Refund {
   reference: string
   order_id: string
   amount_cents: number
+  approved_amount_cents: number | null
   currency: string
   reason: string
   description: string
