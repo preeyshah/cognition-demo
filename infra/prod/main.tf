@@ -61,9 +61,10 @@ provider "aws" {
 module "app" {
   source = "../modules/app"
 
-  image_tag = var.image_tag
-  name      = var.name
-  region    = var.region
+  image_tag   = var.image_tag
+  environment = "dev" # demo mode: mock SSO + seed enabled until a real OIDC provider is wired
+  name        = var.name
+  region      = var.region
 
   # Same wildcard as dev so api tasks don't depend on the distribution existing; tighten to
   # the exact origin (or a custom domain) once CloudFront is verified and stable.
