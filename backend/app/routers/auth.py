@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..audit import audit
-from ..config import get_settings
+from ..config import get_settings, origin_allowed
 from ..db import get_db
 from ..models import Role, User
 from ..schemas import TokenIn, TokenOut, UserOut
@@ -36,7 +36,7 @@ def _origin(url: str) -> str:
 
 
 def _validate_redirect(request: Request, redirect_uri: str) -> None:
-    if _origin(redirect_uri) not in get_settings().redirect_origins:
+    if not origin_allowed(_origin(redirect_uri), get_settings().redirect_origins):
         raise HTTPException(status_code=400, detail="redirect_uri origin is not allowed")
 
 
