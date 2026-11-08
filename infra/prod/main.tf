@@ -67,8 +67,8 @@ module "app" {
 
   # Same wildcard as dev so api tasks don't depend on the distribution existing; tighten to
   # the exact origin (or a custom domain) once CloudFront is verified and stable.
-  allowed_redirect_origins = "https://*.cloudfront.net"
-  cors_origins             = "https://*.cloudfront.net"
+  allowed_redirect_origins = "https://*.cloudfront.net,http://localhost:8080,http://localhost:5173"
+  cors_origins             = "https://*.cloudfront.net,http://localhost:8080,http://localhost:5173"
 
   # Free-tier account limits: single-AZ only and short backup retention. Re-enable
   # multi_az / longer retention after upgrading the account plan.
