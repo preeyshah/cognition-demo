@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { api, payoutInFlight, type Payout, type Refund, type RefundEvent } from '../api'
+import { api, isPartial, payoutInFlight, type Payout, type Refund, type RefundEvent } from '../api'
 import { dateTime, humanize, money, timeAgo } from '../format'
 import { CustomerHistory, type Action } from './RefundActions'
 import { Badge, Drawer, ErrorBox, PayoutBadge, RiskBadge, Spinner, StatusBadge } from './ui'
@@ -55,7 +55,11 @@ export function RefundDrawer({
     >
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: 30, fontWeight: 700 }}>{money(refund.amount_cents)}</div>
+          <div style={{ fontSize: 30, fontWeight: 700 }}>
+            {money(isPartial(refund) ? refund.approved_amount_cents : refund.amount_cents)}
+            {isPartial(refund) ? <> <Badge kind="warning">partial</Badge></> : null}
+          </div>
+          {isPartial(refund) ? <div className="muted" data-testid="partial-refund">Partial refund of {money(refund.amount_cents)} requested</div> : null}
           <div className="muted">{humanize(refund.reason)} · requested {timeAgo(refund.created_at)}</div>
         </div>
         {!readOnly && open && p.can_reject ? (

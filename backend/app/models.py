@@ -90,6 +90,8 @@ class RefundRequest(Base):
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     order_id: Mapped[str] = mapped_column(String(64))
     amount_cents: Mapped[int] = mapped_column(Integer)
+    # Amount actually refunded, set on approval; below amount_cents for an admin-approved partial refund.
+    approved_amount_cents: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     reason: Mapped[RefundReason] = mapped_column(Enum(RefundReason, name="refund_reason"))
     description: Mapped[str] = mapped_column(Text, default="")
@@ -118,9 +120,18 @@ class RefundRequest(Base):
 
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="ck_refund_amount_positive"),
+        CheckConstraint(
+            "approved_amount_cents IS NULL OR (approved_amount_cents > 0 AND approved_amount_cents <= amount_cents)",
+            name="ck_refund_approved_amount_range",
+        ),
         CheckConstraint("risk_score BETWEEN 0 AND 100", name="ck_refund_risk_range"),
         Index("ix_refund_status_assignee", "status", "assigned_to_id"),
     )
+
+    @property
+    def refunded_cents(self) -> int:
+        """Money returned to the customer for an approved refund (rows approved before partial refunds: full amount)."""
+        return self.amount_cents if self.approved_amount_cents is None else self.approved_amount_cents
 
 
 class RefundEvent(Base):

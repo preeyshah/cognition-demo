@@ -164,9 +164,12 @@ def _dispatch_payout(payout_id: int) -> None:
 def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, user: User, db: Session,
             background: BackgroundTasks | None = None) -> RefundOut:
     refund = _load_visible(db, request, user, refund_id, lock=True)
+    if body.amount_cents is not None and action != "approve":
+        deny(db, request, user, f"refund.{action}", "An amount can only be set when approving", 422, "refund", refund.id,
+             approved_amount_cents=body.amount_cents)
     ctx = policy_context(db, user, refund)
     if action == "approve":
-        decision = policy.check_approve(user, refund, ctx)
+        decision = policy.check_approve(user, refund, ctx, body.amount_cents, body.note)
     elif action == "reject":
         decision = policy.check_reject(user, refund, ctx, body.note)
     else:
@@ -174,7 +177,7 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
     if not decision.allowed:
         deny(
             db, request, user, f"refund.{action}", decision.message, 403, "refund", refund.id,
-            amount_cents=refund.amount_cents, reasons=decision.reasons,
+            amount_cents=refund.amount_cents, approved_amount_cents=body.amount_cents, reasons=decision.reasons,
         )
     previous = refund.status
     note = (body.note or "").strip() or None
@@ -188,11 +191,16 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
         refund.decided_by_id = user.id
         refund.decided_at = now_utc()
         refund.decision_note = note
+    approved = {}
+    if action == "approve":
+        refund.approved_amount_cents = body.amount_cents or refund.amount_cents
+        approved = {"approved_amount_cents": refund.approved_amount_cents,
+                    "partial": refund.approved_amount_cents < refund.amount_cents}
     _event(db, refund, user, action + ("d" if action.endswith("e") else "ed"), previous, note,
-           amount_cents=refund.amount_cents, actor_role=user.role.value)
+           amount_cents=refund.amount_cents, actor_role=user.role.value, **approved)
     payout = payouts.enqueue(db, refund, user) if action == "approve" else None
     audit(db, request, user, f"refund.{action}", "refund", refund.id, amount_cents=refund.amount_cents,
-          from_status=previous.value, to_status=refund.status.value)
+          from_status=previous.value, to_status=refund.status.value, **approved)
     db.commit()
     if payout is not None and background is not None:
         background.add_task(_dispatch_payout, payout.id)

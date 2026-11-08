@@ -229,6 +229,7 @@ def fulfil_dsr(request_id: int, request: Request, actor: User = Depends(admin_on
             "customer": {"external_id": c.external_id, "name": c.name, "email": c.email, "country": c.country,
                          "created_at": c.created_at},
             "refunds": [{"reference": x.reference, "order_id": x.order_id, "amount_cents": x.amount_cents,
+                         "approved_amount_cents": x.approved_amount_cents,
                          "currency": x.currency, "reason": x.reason.value, "status": x.status.value,
                          "created_at": x.created_at, "decided_at": x.decided_at} for x in refunds],
         }

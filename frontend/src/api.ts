@@ -21,6 +21,7 @@ export interface UserRef {
 
 export interface Permissions {
   can_approve: boolean
+  can_partial_refund: boolean
   can_reject: boolean
   can_escalate: boolean
   can_view_history: boolean
@@ -50,6 +51,8 @@ export interface Payout {
   updated_at: string
 }
 
+export const isPartial = (r: Refund) => r.approved_amount_cents != null && r.approved_amount_cents < r.amount_cents
+
 export const payoutInFlight = (p: Payout | null | undefined) => !!p && p.status !== 'succeeded' && p.status !== 'failed'
 
 export interface Refund {
@@ -57,6 +60,7 @@ export interface Refund {
   reference: string
   order_id: string
   amount_cents: number
+  approved_amount_cents: number | null
   currency: string
   reason: string
   description: string

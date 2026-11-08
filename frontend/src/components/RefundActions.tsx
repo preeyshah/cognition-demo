@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api, type Refund, type User } from '../api'
-import { dateTime, humanize, money } from '../format'
+import { dateTime, dollars, humanize, money, toCents } from '../format'
 import { Badge, ErrorBox, Modal, RoleBadge, Spinner, StatusBadge } from './ui'
 
 export type Action = 'approve' | 'reject' | 'escalate'
@@ -14,14 +14,18 @@ const copy: Record<Action, { title: string; cta: string; cls: string; placeholde
 
 export function DecisionModal({ refund, action, onClose, onDone }: { refund: Refund; action: Action; onClose: () => void; onDone: (r: Refund) => void }) {
   const [note, setNote] = useState('')
+  const [amount, setAmount] = useState(dollars(refund.amount_cents))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const c = copy[action]
+  const canPartial = action === 'approve' && refund.permissions.can_partial_refund
+  const amountCents = toCents(amount)
+  const partial = canPartial && amountCents !== refund.amount_cents
   const submit = async () => {
     setBusy(true)
     setError(null)
     try {
-      onDone(await api<Refund>(`/refunds/${refund.id}/${action}`, 'POST', { note }))
+      onDone(await api<Refund>(`/refunds/${refund.id}/${action}`, 'POST', partial ? { note, amount_cents: amountCents } : { note }))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -34,13 +38,20 @@ export function DecisionModal({ refund, action, onClose, onDone }: { refund: Ref
       <div className="muted" style={{ marginBottom: 14 }}>
         {refund.customer.name} · {humanize(refund.reason)} · risk {refund.risk_score}
       </div>
-      <textarea autoFocus style={{ width: '100%' }} placeholder={c.placeholder} value={note} onChange={(e) => setNote(e.target.value)} data-testid="decision-note" />
+      {canPartial ? (
+        <label className="field" style={{ marginBottom: 12 }}>
+          Amount to refund (USD) · lower it for a partial refund
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" data-testid="decision-amount" />
+          {partial ? <span className="muted">Partial refund of {money(amountCents)} out of {money(refund.amount_cents)} requested</span> : null}
+        </label>
+      ) : null}
+      <textarea autoFocus style={{ width: '100%' }} placeholder={partial ? 'Why only part of the amount? (required, min 10 chars)' : c.placeholder} value={note} onChange={(e) => setNote(e.target.value)} data-testid="decision-note" />
       <ErrorBox message={error} />
       <p className="muted">Recorded in the refund timeline and the append-only audit log.</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className={`btn ${c.cls}`} disabled={busy} onClick={submit} data-testid="decision-confirm">
-          {busy ? 'Saving…' : c.cta}
+          {busy ? 'Saving…' : partial ? `Approve ${money(amountCents)}` : c.cta}
         </button>
       </div>
     </Modal>

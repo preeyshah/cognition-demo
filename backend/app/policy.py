@@ -71,10 +71,20 @@ def _base_action_checks(user: User, refund: RefundRequest) -> list[str]:
     return reasons
 
 
-def check_approve(user: User, refund: RefundRequest, ctx: PolicyContext) -> Decision:
+def check_approve(user: User, refund: RefundRequest, ctx: PolicyContext,
+                  amount_cents: int | None = None, note: str | None = None) -> Decision:
+    """`amount_cents` below the requested amount is a partial refund. Every limit below is still evaluated
+    against the full requested amount, so a partial refund never lets anyone approve what they couldn't in full."""
     reasons = _base_action_checks(user, refund)
     if reasons:
         return Decision(False, reasons)
+    if amount_cents is not None and amount_cents > refund.amount_cents:
+        reasons.append("Approved amount cannot exceed the requested amount")
+    elif amount_cents is not None and amount_cents < refund.amount_cents:
+        if user.role != Role.admin:
+            reasons.append("Only admins can approve a partial refund")
+        elif len((note or "").strip()) < ctx.get("min_note_length"):
+            reasons.append(f"A note of at least {ctx.get('min_note_length')} characters is required for a partial refund")
     if refund.amount_cents > ctx.get("max_refund_cents"):
         reasons.append("Amount exceeds the organisation hard cap")
     if refund.amount_cents > user.approval_limit_cents:

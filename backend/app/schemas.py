@@ -35,6 +35,7 @@ class CustomerOut(BaseModel):
 
 class Permissions(BaseModel):
     can_approve: bool
+    can_partial_refund: bool = False
     can_reject: bool
     can_escalate: bool
     can_view_history: bool
@@ -69,6 +70,7 @@ class RefundOut(BaseModel):
     reference: str
     order_id: str
     amount_cents: int
+    approved_amount_cents: int | None = None
     currency: str
     reason: RefundReason
     description: str
@@ -111,6 +113,8 @@ class RefundList(BaseModel):
 
 class DecisionIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+    # Approve only: refund less than requested (admins only, see policy.check_approve).
+    amount_cents: int | None = Field(default=None, gt=0)
 
 
 class AssignIn(BaseModel):

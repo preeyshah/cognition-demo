@@ -39,9 +39,14 @@ def get_policies(db: Session) -> dict[str, int]:
     return values
 
 
+def refunded_amount():
+    """SQL twin of `RefundRequest.refunded_cents`."""
+    return func.coalesce(RefundRequest.approved_amount_cents, RefundRequest.amount_cents)
+
+
 def approved_today_cents(db: Session, user_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(func.coalesce(func.sum(refunded_amount()), 0)).where(
             RefundRequest.decided_by_id == user_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= start_of_day(),
@@ -51,7 +56,7 @@ def approved_today_cents(db: Session, user_id: int) -> int:
 
 def customer_30d_approved_cents(db: Session, customer_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(func.coalesce(func.sum(refunded_amount()), 0)).where(
             RefundRequest.customer_id == customer_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= now_utc() - timedelta(days=30),
@@ -107,6 +112,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
         reference=refund.reference,
         order_id=refund.order_id,
         amount_cents=refund.amount_cents,
+        approved_amount_cents=refund.approved_amount_cents,
         currency=refund.currency,
         reason=refund.reason,
         description=refund.description,
@@ -132,6 +138,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
         created_at=refund.created_at,
         permissions=Permissions(
             can_approve=approve.allowed,
+            can_partial_refund=approve.allowed and user.role == Role.admin,
             can_reject=reject.allowed,
             can_escalate=escalate.allowed,
             can_view_history=history.allowed,
