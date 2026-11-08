@@ -33,50 +33,85 @@ resource "aws_db_instance" "replica" {
 
 # --- AWS Backup: daily + weekly, copied to a vault in the DR region ---
 resource "aws_kms_key" "dr" {
+  count               = var.enable_backup ? 1 : 0
   provider            = aws.dr
   description         = "${var.name} DR backup vault"
   enable_key_rotation = true
 }
 
+# The DR vault's key must let AWS Backup in the DR region use it (default policy is IAM-only).
+data "aws_iam_policy_document" "dr_key" {
+  count = var.enable_backup ? 1 : 0
+  statement {
+    sid       = "EnableIAMUserPermissions"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+  statement {
+    sid       = "AllowBackup"
+    actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["backup.${var.dr_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_kms_key_policy" "dr" {
+  count    = var.enable_backup ? 1 : 0
+  provider = aws.dr
+  key_id   = aws_kms_key.dr[0].id
+  policy   = data.aws_iam_policy_document.dr_key[0].json
+}
+
 resource "aws_backup_vault" "primary" {
+  count       = var.enable_backup ? 1 : 0
   name        = "${var.name}-primary"
   kms_key_arn = aws_kms_key.app.arn
 }
 
 resource "aws_backup_vault" "dr" {
+  count       = var.enable_backup ? 1 : 0
   provider    = aws.dr
   name        = "${var.name}-dr"
-  kms_key_arn = aws_kms_key.dr.arn
+  kms_key_arn = aws_kms_key.dr[0].arn
 }
 
 resource "aws_backup_plan" "db" {
-  name = "${var.name}-db"
+  count = var.enable_backup ? 1 : 0
+  name  = "${var.name}-db"
 
   rule {
     rule_name         = "daily"
-    target_vault_name = aws_backup_vault.primary.name
+    target_vault_name = aws_backup_vault.primary[0].name
     schedule          = "cron(0 5 * * ? *)"
     lifecycle { delete_after = 35 }
     copy_action {
-      destination_vault_arn = aws_backup_vault.dr.arn
+      destination_vault_arn = aws_backup_vault.dr[0].arn
       lifecycle { delete_after = 35 }
     }
   }
 
   rule {
     rule_name         = "weekly"
-    target_vault_name = aws_backup_vault.primary.name
+    target_vault_name = aws_backup_vault.primary[0].name
     schedule          = "cron(0 6 ? * SUN *)"
     lifecycle { delete_after = 180 }
     copy_action {
-      destination_vault_arn = aws_backup_vault.dr.arn
+      destination_vault_arn = aws_backup_vault.dr[0].arn
       lifecycle { delete_after = 180 }
     }
   }
 }
 
 resource "aws_iam_role" "backup" {
-  name = "${var.name}-backup"
+  count = var.enable_backup ? 1 : 0
+  name  = "${var.name}-backup"
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "backup.amazonaws.com" } }]
@@ -84,15 +119,16 @@ resource "aws_iam_role" "backup" {
 }
 
 resource "aws_iam_role_policy_attachment" "backup" {
-  for_each   = toset(["AWSBackupServiceRolePolicyForBackup", "AWSBackupServiceRolePolicyForRestores"])
-  role       = aws_iam_role.backup.name
+  for_each   = var.enable_backup ? toset(["AWSBackupServiceRolePolicyForBackup", "AWSBackupServiceRolePolicyForRestores"]) : toset([])
+  role       = aws_iam_role.backup[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/${each.value}"
 }
 
 resource "aws_backup_selection" "db" {
+  count        = var.enable_backup ? 1 : 0
   name         = "${var.name}-db"
-  plan_id      = aws_backup_plan.db.id
-  iam_role_arn = aws_iam_role.backup.arn
+  plan_id      = aws_backup_plan.db[0].id
+  iam_role_arn = aws_iam_role.backup[0].arn
   resources    = [aws_db_instance.main.arn]
 }
 

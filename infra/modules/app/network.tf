@@ -3,7 +3,7 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 }
 
 # Public subnets hold only the ALB and NAT; tasks and the database sit in private subnets.
@@ -18,7 +18,7 @@ module "vpc" {
   private_subnets  = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 8, 10 + i)]
   database_subnets = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 8, 20 + i)]
 
-  enable_nat_gateway                     = true
+  enable_nat_gateway                     = var.enable_nat_gateway
   single_nat_gateway                     = true
   create_database_subnet_group           = true
   create_database_subnet_route_table     = true

@@ -41,3 +41,12 @@ jobs:
       - name: Teardown
         if: always()
         run: docker compose down -v
+
+  deploy-aws:
+    needs: ci
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: dev
+      github_environment: development
+    secrets: inherit

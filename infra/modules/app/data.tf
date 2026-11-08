@@ -3,6 +3,46 @@ resource "aws_kms_key" "app" {
   enable_key_rotation = true
 }
 
+data "aws_caller_identity" "current" {}
+
+# AWS services that call KMS directly with this CMK (log groups, RDS storage + managed
+# password, Secrets Manager, AWS Backup vault) need explicit key-policy grants — the
+# default policy only delegates to IAM principals in the account.
+data "aws_iam_policy_document" "app_key" {
+  statement {
+    sid       = "EnableIAMUserPermissions"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = {
+      AllowCloudWatchLogs = "logs.${var.region}.amazonaws.com"
+      AllowSecretsManager = "secretsmanager.${var.region}.amazonaws.com"
+      AllowRDS            = "rds.amazonaws.com" # RDS uses the global service principal, not regional
+      AllowBackup         = "backup.${var.region}.amazonaws.com"
+    }
+    content {
+      sid       = statement.key
+      actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+      resources = ["*"]
+      principals {
+        type        = "Service"
+        identifiers = [statement.value]
+      }
+    }
+  }
+}
+
+resource "aws_kms_key_policy" "app" {
+  key_id = aws_kms_key.app.id
+  policy = data.aws_iam_policy_document.app_key.json
+}
+
 locals {
   # Default Postgres settings; var.db_parameters can override or extend these via PR.
   db_pg_parameters = merge({
@@ -54,9 +94,9 @@ resource "aws_db_instance" "main" {
   monitoring_interval                   = 60
   monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
   performance_insights_retention_period = 7
-  deletion_protection                   = true
-  skip_final_snapshot                   = false
-  final_snapshot_identifier             = "${var.name}-final"
+  deletion_protection                   = var.db_deletion_protection
+  skip_final_snapshot                   = var.db_skip_final_snapshot
+  final_snapshot_identifier             = var.db_skip_final_snapshot ? null : "${var.name}-final"
   performance_insights_enabled          = true
   performance_insights_kms_key_id       = aws_kms_key.app.arn
   enabled_cloudwatch_logs_exports       = ["postgresql"]

@@ -341,7 +341,7 @@ scripts/secrets.sh push     # copy the local store into Secrets Manager, then de
 
 ## Database monitoring & redundancy
 
-On AWS (Terraform, `infra/data.tf` + `infra/db_resilience.tf`):
+On AWS (Terraform, `infra/modules/app/data.tf` + `infra/modules/app/db_resilience.tf`):
 - **Multi-AZ standby** with automatic failover, and an optional read replica (`-var db_read_replica=true`).
 - **Backups:** 14-day point-in-time recovery, plus an AWS Backup plan (daily kept 35 days, weekly kept 180 days) that copies every backup to a vault in `dr_region`.
 - **Monitoring:** Enhanced Monitoring (60 s), Performance Insights, and a CloudWatch dashboard.
@@ -358,27 +358,37 @@ scripts/db-ops.sh aws-status <rds-id>
 
 ## CI/CD & branch flow
 
-- **Branch model**: all work lands on `dev` via PR. Merging to `dev` runs CI and then the *Dev deploy* workflow,
-  which brings the whole stack up with `docker compose` and smoke-tests `/health`, `/auth/config` and the mock
-  SSO page — that merge **is** the dev deployment. Production only moves via a `dev` → `main` PR; a CI check
+- **Branch model**: all work lands on `dev` via PR. Merging to `dev` runs CI, the *Dev deploy* docker-compose
+  smoke test, and (when `AWS_DEPLOY_ENABLED=true`) an AWS deploy of `infra/dev`. Production only moves via a
+  `dev` → `main` PR, which deploys `infra/prod`; a CI check
   (`branch-flow.yml`) rejects any other PR targeting `main`. (Hotfix exception: temporarily allow the PR in
   GitHub branch protection / merge it as an admin, then back-merge to `dev`.)
 - `.github/workflows/ci.yml` (every PR and push to `main`/`dev`): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
-- `.github/workflows/dev.yml` (push to `dev`): CI, then the docker-compose dev deploy + smoke test above.
-- `.github/workflows/infra-plan.yml` (PRs touching `infra/`): `terraform plan` against real AWS state via a read-only OIDC role, posted to the job summary. Enable by setting the repo variable `AWS_PLAN_ROLE_ARN` (see below).
-- `.github/workflows/deploy.yml` (push to `main` only): reruns CI, then via GitHub OIDC (no stored AWS keys) builds/pushes the image to ECR, `terraform apply`s with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`. The AWS deployment runs with `ENVIRONMENT=prod` (mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ROLE_ARN` is set.
+- `.github/workflows/dev.yml` (push to `dev`): CI, then the docker-compose dev deploy + smoke test above, plus an AWS deploy of the `dev` environment when `AWS_DEPLOY_ENABLED=true`.
+- `.github/workflows/infra-plan.yml` (PRs touching `infra/`): `terraform plan` for both `infra/dev` and `infra/prod` against real AWS state, posted to the job summary. Enable by setting the repo variable `AWS_DEPLOY_ENABLED=true` (see below).
+- `.github/workflows/deploy-env.yml` (reusable): builds/pushes the image to ECR, `terraform apply`s the given environment root with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`.
+- `.github/workflows/deploy.yml` (**manual only** — Actions → Deploy → Run workflow): reruns CI, then deploys `infra/prod` (`ENVIRONMENT=prod`: mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ENABLED=true` is set.
 
 ## AWS infrastructure (`infra/`, Terraform)
 
+Two environments share one module — `infra/modules/app` — instantiated by two thin roots:
+
+- `infra/dev` → state key `refunds-console-dev/terraform.tfstate`, name `refunds-dev`: **minimal** — subnets in 2 AZs
+  (ALB/RDS requirement) but no NAT (tasks run in public subnets), no WAF, no autoscaling, no AWS Backup,
+  `db.t4g.micro` single-AZ, 1×256/1024 api + 1×256/512 provider Fargate tasks, `ENVIRONMENT=dev` (mock SSO + demo
+  seed on, like docker compose).
+- `infra/prod` → state key `refunds-console/terraform.tfstate`, name `refunds-console`: the full stack below.
+  `moved.tf` maps the pre-module state addresses so the first apply updates in place (no recreates).
+
 ```text
-Browser ──HTTPS──> CloudFront (+ AWS WAF: IP reputation, OWASP common, bad inputs, SQLi, per-IP + SSO rate limits)
+Browser ──HTTPS──> CloudFront (+ AWS WAF on prod: IP reputation, OWASP common, bad inputs, SQLi, rate limits)
                     ├── /*     -> S3 (private, OAC only)                      React SPA
                     └── /api/* -> ALB (SG: CloudFront prefix list only, secret origin header, else 403)
-                                 └── ECS Fargate "api" (private subnets, non-root, read-only FS)
-                                      ├── autoscaling: target tracking on CPU (60%), memory (75%),
+                                 └── ECS Fargate "api" (private subnets on prod, non-root, read-only FS)
+                                      ├── autoscaling (prod): target tracking on CPU (60%), memory (75%),
                                       │   requests/target (1000/min); bounds api_min_count..api_max_count
                                       ├── RDS Postgres 16 (DB subnets, no public IP, KMS, force SSL,
-                                      │   storage autoscaling, backups, deletion protection)
+                                      │   storage autoscaling, backups + DR copy, deletion protection)
                                       └── ECS "provider" (mock PayCore, reachable only from api via Cloud Map)
 Secrets Manager (KMS): RDS-managed DB password, JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
 ```
@@ -388,18 +398,32 @@ Same-origin SPA + API means the browser never makes cross-origin calls; CORS and
 One-time setup (admin credentials, dedicated AWS account):
 
 ```bash
-cd infra/bootstrap && terraform init && terraform apply          # state bucket, lock table, GitHub OIDC deploy + plan roles
-gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform output -raw deploy_role_arn)"
-gh variable set AWS_PLAN_ROLE_ARN  --body "$(terraform output -raw plan_role_arn)"   # enables infra-plan on PRs
-gh variable set TF_STATE_BUCKET   --body "$(terraform output -raw state_bucket)"
-gh variable set AWS_REGION        --body us-east-1
+cd infra/bootstrap && terraform init && terraform apply          # state bucket, lock table, GitHub OIDC roles (optional)
+gh secret set AWS_ACCESS_KEY_ID     --body "<key id>"           # IAM user with rights to build/apply this stack
+gh secret set AWS_SECRET_ACCESS_KEY --body "<secret>"
+gh variable set AWS_DEPLOY_ENABLED  --body true                 # turns on deploy.yml, dev.yml AWS deploy, infra-plan
+gh variable set TF_STATE_BUCKET     --body "$(terraform output -raw state_bucket)"
+gh variable set AWS_REGION          --body us-east-1
+# optional: gh variable set DEVIN_ORG_ID --body "<org id>"
 # optional self-healing: after the first deploy, `scripts/secrets.sh push` stores the Devin key in Secrets Manager.
 # ECS reads secrets at task start, so roll the API tasks to pick the key up:
 # aws ecs update-service --cluster refunds-console --service api --force-new-deployment
 ```
 
-Every infra setting is a Terraform variable — change it in a PR (see [`infra/terraform.tfvars.example`](infra/terraform.tfvars.example) for the full list): instance class and storage for the database, Postgres parameters (`db_parameters`, e.g. `work_mem`), task cpu/memory, autoscaling bounds, VPC CIDR, WAF rate limits. On the PR, the **Infra plan** workflow shows the exact diff; merging to `main` applies it. Parameter-group changes that need a reboot show as pending-reboot — reboot the instance from the RDS console or `aws rds reboot-db-instance` after merge.
+Deploys authenticate with the `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo secrets. `infra/bootstrap` can also
+mint GitHub OIDC roles (`deploy_role_arn`/`plan_role_arn`) if you later want keyless CI — swap the
+`aws-access-key-id`/`aws-secret-access-key` inputs in `deploy-env.yml`/`infra-plan.yml` for `role-to-assume` then.
 
-Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
+Every infra setting is a Terraform variable on the module — change it in a PR (see
+[`infra/modules/app/terraform.tfvars.example`](infra/modules/app/terraform.tfvars.example) for the full list):
+instance class and storage for the database, Postgres parameters (`db_parameters`, e.g. `work_mem`), task
+cpu/memory, autoscaling bounds, VPC CIDR, WAF rate limits, and the environment sizing toggles (`az_count`,
+`enable_nat_gateway`, `enable_waf`, `enable_autoscaling`, `enable_backup`, `db_multi_az`, ...). Env roots live in
+`infra/dev/main.tf` and `infra/prod/main.tf`. On the PR, the **Infra plan** workflow shows the exact diff for both
+environments; merging to `main` applies prod, merging to `dev` applies dev. Parameter-group changes that need a
+reboot show as pending-reboot — reboot the instance from the RDS console or `aws rds reboot-db-instance` after merge.
+
+Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output of the matching
+environment root.
 
 Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data) and prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only). Redeemed SSO codes are tracked in Postgres (`used_sso_codes`), so single-use holds across API tasks.

@@ -1,8 +1,9 @@
 name: Infra plan
 
-# Runs `terraform plan` on every PR that touches infra, using a read-only OIDC role
-# (refunds-console-github-plan, created by infra/bootstrap). Set the repo variable
-# AWS_PLAN_ROLE_ARN to enable; until then this workflow is a no-op.
+# Runs `terraform plan` on every PR that touches infra, for both environment roots,
+# using the AWS credentials stored as repo secrets. Enable by setting the repo
+# variable AWS_DEPLOY_ENABLED=true (see README "AWS infrastructure"); until then
+# this workflow is a no-op.
 on:
   pull_request:
     paths:
@@ -14,32 +15,36 @@ permissions:
 
 jobs:
   plan:
-    if: vars.AWS_PLAN_ROLE_ARN != ''
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
     permissions:
       contents: read
-      id-token: write # GitHub OIDC -> short-lived AWS credentials, no stored keys
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
       - name: Terraform init
-        working-directory: infra
+        working-directory: infra/${{ matrix.environment }}
         run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=$AWS_REGION"
       - name: Terraform plan
-        working-directory: infra
-        run: terraform plan -input=false -no-color | tee plan.txt
+        working-directory: infra/${{ matrix.environment }}
+        run: terraform plan -input=false -lock-timeout=10m -no-color | tee plan.txt
       - name: Publish plan
         if: always()
-        working-directory: infra
+        working-directory: infra/${{ matrix.environment }}
         run: |
           if [ -f plan.txt ]; then
-            { echo '### terraform plan'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "### terraform plan (${{ matrix.environment }})"; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
