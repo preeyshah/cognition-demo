@@ -1,9 +1,8 @@
 name: Deploy
 
-# Every push to main runs the full CI suite; only if it passes do we build, migrate infra and roll out.
+# Production deploys are manual only: run this workflow from the Actions tab (or `gh workflow run`).
+# It still runs the full CI suite first; only if it passes does it build, migrate infra and roll out.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
