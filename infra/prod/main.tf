@@ -63,6 +63,11 @@ module "app" {
   allowed_redirect_origins = "https://*.cloudfront.net"
   cors_origins             = "https://*.cloudfront.net"
 
+  # Free-tier account limits: single-AZ only and short backup retention. Re-enable
+  # multi_az / longer retention after upgrading the account plan.
+  db_multi_az              = false
+  db_backup_retention_days = 1
+
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
