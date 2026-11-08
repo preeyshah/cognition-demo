@@ -40,7 +40,7 @@ jobs:
         run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=$AWS_REGION"
       - name: Terraform plan
         working-directory: infra/${{ matrix.environment }}
-        run: terraform plan -input=false -no-color | tee plan.txt
+        run: terraform plan -input=false -lock-timeout=10m -no-color | tee plan.txt
       - name: Publish plan
         if: always()
         working-directory: infra/${{ matrix.environment }}
