@@ -380,7 +380,8 @@ Two environments share one module — `infra/modules/app` — instantiated by tw
 - `infra/prod` → state key `refunds-console/terraform.tfstate`, name `refunds-console`: the full stack below.
   `moved.tf` maps the pre-module state addresses so the first apply updates in place (no recreates).
   Currently sized for the AWS free tier (`db_multi_az=false`, `db_backup_retention_days=1`) — flip those back
-  to the module defaults after upgrading the account plan.
+  to the module defaults after upgrading the account plan. Deployed at https://d2r4c05e3dgv73.cloudfront.net
+  (empty DB — `ENVIRONMENT=prod` disables seed; run a one-off ECS task with `SEED_ON_STARTUP=true` to load demo data).
 
 ```text
 Browser ──HTTPS──> CloudFront (+ AWS WAF on prod: IP reputation, OWASP common, bad inputs, SQLi, rate limits)
