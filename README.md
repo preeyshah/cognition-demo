@@ -366,7 +366,7 @@ scripts/db-ops.sh aws-status <rds-id>
 - `.github/workflows/ci.yml` (every PR and push to `main`/`dev`): ruff, pytest, a Postgres 16 smoke test (`backend/scripts/pg_smoke.py`), frontend oxlint + `tsc` + Vite build, Docker builds, `terraform fmt`/`validate`.
 - `.github/workflows/dev.yml` (push to `dev`): CI, then the docker-compose dev deploy + smoke test above, plus an AWS deploy of the `dev` environment when `AWS_DEPLOY_ENABLED=true`.
 - `.github/workflows/infra-plan.yml` (PRs touching `infra/`): `terraform plan` for both `infra/dev` and `infra/prod` against real AWS state, posted to the job summary. Enable by setting the repo variable `AWS_DEPLOY_ENABLED=true` (see below).
-- `.github/workflows/deploy-env.yml` (reusable): builds/pushes the image to ECR, `terraform apply`s the given environment root with the new image tag, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`.
+- `.github/workflows/deploy-env.yml` (reusable): builds/pushes the image to ECR (tag = commit SHA, passed through each env root's `image_tag` variable), `terraform apply`s the given environment root, waits for a stable ECS rollout (auto-rollback on failure), publishes the SPA to S3, invalidates CloudFront and smoke-tests `/api/health`. Apply errors are warnings, not failures — CloudFront-dependent resources are skipped if distribution creation is blocked (e.g. pending AWS account verification); frontend publish + smoke test run only when a distribution exists.
 - `.github/workflows/deploy.yml` (**manual only** — Actions → Deploy → Run workflow): reruns CI, then deploys `infra/prod` (`ENVIRONMENT=prod`: mock SSO and demo seed disabled). Skipped until the repo variable `AWS_DEPLOY_ENABLED=true` is set.
 
 ## AWS infrastructure (`infra/`, Terraform)
@@ -376,9 +376,11 @@ Two environments share one module — `infra/modules/app` — instantiated by tw
 - `infra/dev` → state key `refunds-console-dev/terraform.tfstate`, name `refunds-dev`: **minimal** — subnets in 2 AZs
   (ALB/RDS requirement) but no NAT (tasks run in public subnets), no WAF, no autoscaling, no AWS Backup,
   `db.t4g.micro` single-AZ, 1×256/1024 api + 1×256/512 provider Fargate tasks, `ENVIRONMENT=dev` (mock SSO + demo
-  seed on, like docker compose).
+  seed on, like docker compose). Deployed at https://d2eah532twinmd.cloudfront.net.
 - `infra/prod` → state key `refunds-console/terraform.tfstate`, name `refunds-console`: the full stack below.
   `moved.tf` maps the pre-module state addresses so the first apply updates in place (no recreates).
+  Currently sized for the AWS free tier (`db_multi_az=false`, `db_backup_retention_days=1`) — flip those back
+  to the module defaults after upgrading the account plan.
 
 ```text
 Browser ──HTTPS──> CloudFront (+ AWS WAF on prod: IP reputation, OWASP common, bad inputs, SQLi, rate limits)
@@ -393,7 +395,9 @@ Browser ──HTTPS──> CloudFront (+ AWS WAF on prod: IP reputation, OWASP c
 Secrets Manager (KMS): RDS-managed DB password, JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
 ```
 
-Same-origin SPA + API means the browser never makes cross-origin calls; CORS and the SSO redirect allow-list are pinned to the CloudFront origin. `TRUSTED_PROXY_HOPS=2` makes audit IPs come from the CloudFront/ALB-appended `X-Forwarded-For` entry, not client-supplied values.
+Same-origin SPA + API means the browser never makes cross-origin calls; CORS and the SSO redirect allow-list are pinned to allowed origins. Both are module variables (`allowed_redirect_origins`, `cors_origins`) supporting `*` wildcards — envs currently allow `https://*.cloudfront.net` plus `localhost:8080`/`localhost:5173` for local frontend dev. `TRUSTED_PROXY_HOPS=2` makes audit IPs come from the CloudFront/ALB-appended `X-Forwarded-For` entry, not client-supplied values.
+
+Escape hatch: `allow_public_alb` (module var, default off) opens the ALB to `0.0.0.0/0` without the origin-verify header — for dev only while CloudFront is unavailable; keep it off in prod.
 
 One-time setup (admin credentials, dedicated AWS account):
 
@@ -417,9 +421,11 @@ mint GitHub OIDC roles (`deploy_role_arn`/`plan_role_arn`) if you later want key
 Every infra setting is a Terraform variable on the module — change it in a PR (see
 [`infra/modules/app/terraform.tfvars.example`](infra/modules/app/terraform.tfvars.example) for the full list):
 instance class and storage for the database, Postgres parameters (`db_parameters`, e.g. `work_mem`), task
-cpu/memory, autoscaling bounds, VPC CIDR, WAF rate limits, and the environment sizing toggles (`az_count`,
-`enable_nat_gateway`, `enable_waf`, `enable_autoscaling`, `enable_backup`, `db_multi_az`, ...). Env roots live in
-`infra/dev/main.tf` and `infra/prod/main.tf`. On the PR, the **Infra plan** workflow shows the exact diff for both
+cpu/memory, autoscaling bounds, VPC CIDR, WAF rate limits, image tag (`image_tag`, fed by `TF_VAR_image_tag` =
+commit SHA in deploys), allowed origins (`allowed_redirect_origins`, `cors_origins`), the `allow_public_alb`
+escape hatch, and the environment sizing toggles (`az_count`, `enable_nat_gateway`, `enable_waf`,
+`enable_autoscaling`, `enable_backup`, `db_multi_az`, ...). Env roots live in `infra/dev/main.tf` and
+`infra/prod/main.tf`. On the PR, the **Infra plan** workflow shows the exact diff for both
 environments; merging to `main` applies prod, merging to `dev` applies dev. Parameter-group changes that need a
 reboot show as pending-reboot — reboot the instance from the RDS console or `aws rds reboot-db-instance` after merge.
 
