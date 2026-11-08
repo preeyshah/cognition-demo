@@ -48,3 +48,15 @@ def test_prod_explicit_sandbox_controls_respected():
 def test_invalid_environment_rejected():
     with pytest.raises(ValidationError, match="ENVIRONMENT"):
         Settings(environment="staging", _env_file=None)
+
+
+def test_origin_allowed_exact_and_wildcard():
+    from app.config import origin_allowed
+
+    patterns = ["https://app.example.com", "https://*.cloudfront.net"]
+    assert origin_allowed("https://app.example.com", patterns)
+    assert origin_allowed("https://d123.cloudfront.net", patterns)
+    assert not origin_allowed("https://cloudfront.net", patterns)
+    assert not origin_allowed("https://d123.cloudfront.net.evil.com", patterns)
+    assert not origin_allowed("https://evil.com", patterns)
+    assert not origin_allowed("http://d123.cloudfront.net", patterns)

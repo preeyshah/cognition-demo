@@ -42,3 +42,5 @@
 # enable_backup            = true     # AWS Backup plans + cross-region copy
 # db_deletion_protection   = true
 # db_skip_final_snapshot   = false
+# allowed_redirect_origins = "https://app.example.com"   # SSO redirect allowlist ('*' wildcards ok)
+# cors_origins             = "https://app.example.com"   # API CORS allowlist ('*' wildcards ok)

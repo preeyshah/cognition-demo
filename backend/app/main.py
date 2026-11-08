@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .config import get_settings
+from .config import get_settings, origin_pattern_regex
 from .db import Base, SessionLocal, engine
 from .models import RequestTrace
 from .payouts import PayoutWorker
@@ -65,11 +65,14 @@ async def lifespan(_: FastAPI):
 
 
 configure_logging(get_settings().log_level)
+_cors_origins = [o.strip() for o in get_settings().cors_origins.split(",") if o.strip()]
 app = FastAPI(title="Refunds Console API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
+_cors_regex = "|".join(rx for o in _cors_origins if (rx := origin_pattern_regex(o)))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
+    allow_origins=[o for o in _cors_origins if "*" not in o],
+    allow_origin_regex=_cors_regex or None,
     allow_methods=["GET", "POST", "PUT", "PATCH"],
     allow_headers=["Authorization", "Content-Type", TRACE_HEADER],
     expose_headers=[TRACE_HEADER],

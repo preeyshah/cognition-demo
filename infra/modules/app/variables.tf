@@ -135,6 +135,18 @@ variable "alert_email" {
 
 # --- Environment sizing (dev sets these small; prod keeps the defaults) --------
 
+variable "allowed_redirect_origins" {
+  description = "Comma-separated origins the SSO flow may redirect back to. Supports '*' wildcards (e.g. https://*.cloudfront.net). Set per env so api tasks don't depend on the CloudFront resource existing."
+  type        = string
+  default     = ""
+}
+
+variable "cors_origins" {
+  description = "Comma-separated CORS origins for the API. Supports '*' wildcards."
+  type        = string
+  default     = ""
+}
+
 variable "environment" {
   description = "Runtime mode passed to the API as ENVIRONMENT: 'prod' disables mock SSO + demo seed."
   type        = string
