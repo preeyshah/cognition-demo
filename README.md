@@ -18,7 +18,7 @@ see [AWS infrastructure](#aws-infrastructure-infra-terraform) below. Log in on d
 | Power Apps capability | How it's done here |
 | --- | --- |
 | Role-based screens | One React app; navigation, data and buttons change per role (admin / reviewer / viewer) |
-| Approval workflows | Approve / reject / escalate with notes, per-refund + daily limits, admin sign-off for escalations |
+| Approval workflows | Approve / reject / escalate with notes, per-refund + daily limits, admin sign-off for escalations, admin-only partial refunds |
 | Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`, dev only) → swap in Okta / Entra / Google with config |
 | Dataverse tables | PostgreSQL schema via SQLAlchemy models, constraints and indexes |
 | Connectors | Authenticated HTTP client to a third-party "PayCore" customer-history API (mocked, with API key) |
@@ -114,6 +114,10 @@ To use a real PSP, swap the three functions in `payments_client.py` and the sign
 
 - **Visibility**: reviewers only see refunds assigned to / escalated by / decided by them; others return `404` (no probing).
 - **Approval limits**: per-refund and per-UTC-day limits per user; org-wide hard cap applies to admins too.
+- **Partial refunds**: only admins can approve less than the requested amount (`POST /refunds/{id}/approve`
+  `{amount_cents}`; never more than requested). Limits are still checked against the full requested amount, so a
+  partial approval can't sidestep them; the payout, daily/customer usage and analytics use the approved amount
+  (`approved_amount_cents`).
 - **Risk**: risk score ≥ threshold cannot be approved by a reviewer — must be escalated.
 - **Customer cap**: reviewers can't push a customer over the 30-day refunded cap.
 - **Four-eyes**: nobody can decide a refund they requested; can't be assigned one either.
@@ -193,7 +197,7 @@ cd frontend && npm run test:e2e # Playwright end-to-end (see below)
 ```
 
 **End-to-end tests** ([`frontend/e2e/`](frontend/e2e/)): Playwright specs covering the full mock-SSO + 2FA login,
-the reviewer approve/reject/history workflow, admin surfaces and viewer restrictions. They run against a live
+the reviewer approve/reject/history workflow, admin partial refunds, admin surfaces and viewer restrictions. They run against a live
 stack — bring it up first (`docker compose up -d --build`, or `npm run dev` + backend on :8000), then:
 
 ```bash

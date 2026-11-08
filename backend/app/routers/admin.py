@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..analytics import summary_for
 from ..audit import audit, deny
 from ..db import get_db
-from ..models import AuditLog, PolicySetting, RefundRequest, Role, User
+from ..models import AuditLog, PolicySetting, RefundRequest, RefundStatus, Role, User
 from ..policy import DEFAULT_POLICIES
 from ..schemas import PolicyOut, PolicyUpdateIn, UserCreateIn, UserOut, UserUpdateIn
 from ..security import require_roles
@@ -146,12 +146,14 @@ def export_refunds(request: Request, actor: User = Depends(admin_only), db: Sess
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["reference", "created_at", "status", "amount_cents", "currency", "reason", "risk_score",
-                "customer_external_id", "assigned_to", "decided_by", "decided_at", "escalated_by", "escalation_reason"])
+                "customer_external_id", "assigned_to", "decided_by", "decided_at", "escalated_by", "escalation_reason",
+                "approved_amount_cents"])
     for r in rows:
         w.writerow([r.reference, r.created_at.isoformat(), r.status.value, r.amount_cents, r.currency, r.reason.value,
                     r.risk_score, r.customer.external_id, r.assigned_to.email if r.assigned_to else "",
                     r.decided_by.email if r.decided_by else "", r.decided_at.isoformat() if r.decided_at else "",
-                    r.escalated_by.email if r.escalated_by else "", (r.escalation_reason or "").strip()])
+                    r.escalated_by.email if r.escalated_by else "", (r.escalation_reason or "").strip(),
+                    r.refunded_cents if r.status == RefundStatus.approved else ""])
     audit(db, request, actor, "export.refunds", rows=len(rows))
     db.commit()
     buf.seek(0)
