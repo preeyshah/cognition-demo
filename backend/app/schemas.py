@@ -39,6 +39,7 @@ class Permissions(BaseModel):
     can_escalate: bool
     can_view_history: bool
     can_assign: bool
+    can_approve_partial: bool = False
     approve_blocked_reasons: list[str] = []
     escalate_blocked_reasons: list[str] = []
 
@@ -82,6 +83,7 @@ class RefundOut(BaseModel):
     decided_by: UserRef | None
     decision_note: str | None
     decided_at: datetime | None
+    approved_amount_cents: int | None = None
     sla_due_at: datetime
     overdue: bool
     created_at: datetime
@@ -111,6 +113,8 @@ class RefundList(BaseModel):
 
 class DecisionIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+    # Approve only: refund less than requested (partial refund, admins only). Omit to refund in full.
+    amount_cents: int | None = Field(default=None, gt=0)
 
 
 class AssignIn(BaseModel):

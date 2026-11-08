@@ -46,7 +46,7 @@ def summary_for(db: Session, user: User) -> dict:
         pending = [r for r in mine if r.status == RefundStatus.pending and r.assigned_to_id == user.id]
         approved_today = [r for r in mine if r.decided_by_id == user.id and r.status == RefundStatus.approved and aware(r.decided_at) >= sod]
         week = [r for r in mine if r.decided_by_id == user.id and aware(r.decided_at) >= now - timedelta(days=7)]
-        approved_today_cents = sum(r.amount_cents for r in approved_today)
+        approved_today_cents = sum(r.refunded_cents for r in approved_today)
         remaining = max(user.daily_approval_limit_cents - approved_today_cents, 0)
         overdue = [r for r in pending if aware(r.sla_due_at) < now]
         escalated_open = [r for r in mine if r.escalated_by_id == user.id and r.status == RefundStatus.escalated]
@@ -83,8 +83,8 @@ def summary_for(db: Session, user: User) -> dict:
             _card("escalated", "Escalated to admin", len(escalated), tone="warning" if escalated else "default"),
             _card("open_amount", "Open exposure", sum(r.amount_cents for r in open_rows), "money"),
             _card("overdue", "Past SLA", len(overdue), tone="danger" if overdue else "default"),
-            _card("approved_today", "Refunded today", sum(r.amount_cents for r in approved_today), "money", "success"),
-            _card("approved_30d", "Refunded (30d)", sum(r.amount_cents for r in approved_30), "money"),
+            _card("approved_today", "Refunded today", sum(r.refunded_cents for r in approved_today), "money", "success"),
+            _card("approved_30d", "Refunded (30d)", sum(r.refunded_cents for r in approved_30), "money"),
             _card("approval_rate_30d", "Approval rate (30d)", _rate(len(approved_30), len(decided_30)), "percent"),
             _card("avg_hours_30d", "Avg time to decide (30d)", _avg(_hours(r) for r in decided_30), "hours"),
         ],
@@ -123,10 +123,10 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
             dday = aware(r.decided_at).date().isoformat()
             if r.status == RefundStatus.approved:
                 b["approved"] += 1
-                b["approved_amount_cents"] += r.amount_cents
+                b["approved_amount_cents"] += r.refunded_cents
                 if dday in daily:
                     daily[dday]["approved"] += 1
-                    daily[dday]["approved_amount_cents"] += r.amount_cents
+                    daily[dday]["approved_amount_cents"] += r.refunded_cents
             elif dday in daily:
                 daily[dday]["rejected"] += 1
         bucket = "low (0-39)" if r.risk_score < 40 else "medium (40-69)" if r.risk_score < 70 else "high (70+)"
@@ -149,7 +149,7 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
             "id": u.id, "name": u.name, "role": u.role.value, "is_active": u.is_active,
             "decided": len(mine), "approved": len(ok), "rejected": len(mine) - len(ok),
             "escalated": sum(1 for r in rows if r.escalated_by_id == u.id),
-            "approved_amount_cents": sum(r.amount_cents for r in ok),
+            "approved_amount_cents": sum(r.refunded_cents for r in ok),
             "approval_rate": _rate(len(ok), len(mine)),
             "avg_decision_hours": _avg(_hours(r) for r in mine),
             "open_assigned": open_by_user.get(u.id, 0),
@@ -166,7 +166,7 @@ def analytics(db: Session, user: User, days: int = 30) -> dict:
             "count": len(rows),
             "amount_cents": sum(r.amount_cents for r in rows),
             "approved_count": len(approved),
-            "approved_amount_cents": sum(r.amount_cents for r in approved),
+            "approved_amount_cents": sum(r.refunded_cents for r in approved),
             "rejected_count": by_status["rejected"]["count"],
             "open_count": by_status["pending"]["count"] + by_status["escalated"]["count"],
             "approval_rate": _rate(len(approved), len(decided)),

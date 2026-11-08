@@ -1,5 +1,15 @@
 -- Postgres-only objects applied on startup (idempotent).
 
+-- Partial refunds: columns for databases created before admins could approve less than requested.
+ALTER TABLE refund_requests ADD COLUMN IF NOT EXISTS approved_amount_cents integer;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_refund_approved_amount_range') THEN
+        ALTER TABLE refund_requests ADD CONSTRAINT ck_refund_approved_amount_range CHECK (
+            approved_amount_cents IS NULL OR (approved_amount_cents > 0 AND approved_amount_cents <= amount_cents));
+    END IF;
+END $$;
+
 -- One row per refund with derived metrics; point Metabase / Looker / dbt here.
 CREATE OR REPLACE VIEW v_refund_facts AS
 SELECT
@@ -10,7 +20,9 @@ SELECT
     (r.escalation_reason IS NOT NULL) AS was_escalated,
     EXTRACT(EPOCH FROM (r.decided_at - r.created_at)) / 3600.0 AS hours_to_decision,
     (COALESCE(r.decided_at, now()) > r.sla_due_at) AS sla_breached,
-    date_trunc('day', r.created_at) AS created_day
+    date_trunc('day', r.created_at) AS created_day,
+    CASE WHEN r.status = 'approved' THEN COALESCE(r.approved_amount_cents, r.amount_cents) END AS refunded_cents,
+    (r.approved_amount_cents < r.amount_cents) AS is_partial
 FROM refund_requests r
 JOIN customers c ON c.id = r.customer_id
 LEFT JOIN users a ON a.id = r.assigned_to_id
@@ -23,7 +35,7 @@ SELECT
     date_trunc('day', r.decided_at) AS day,
     COUNT(*) FILTER (WHERE r.status = 'approved') AS approved,
     COUNT(*) FILTER (WHERE r.status = 'rejected') AS rejected,
-    COALESCE(SUM(r.amount_cents) FILTER (WHERE r.status = 'approved'), 0) AS approved_cents,
+    COALESCE(SUM(COALESCE(r.approved_amount_cents, r.amount_cents)) FILTER (WHERE r.status = 'approved'), 0) AS approved_cents,
     u.daily_approval_limit_cents,
     AVG(EXTRACT(EPOCH FROM (r.decided_at - r.created_at)) / 3600.0) AS avg_hours_to_decision
 FROM refund_requests r

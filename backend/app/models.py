@@ -104,6 +104,8 @@ class RefundRequest(Base):
     decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     decision_note: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Amount actually refunded on approval; below amount_cents for an admin-approved partial refund.
+    approved_amount_cents: Mapped[int | None] = mapped_column(Integer)
     sla_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -119,8 +121,17 @@ class RefundRequest(Base):
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="ck_refund_amount_positive"),
         CheckConstraint("risk_score BETWEEN 0 AND 100", name="ck_refund_risk_range"),
+        CheckConstraint(
+            "approved_amount_cents IS NULL OR (approved_amount_cents > 0 AND approved_amount_cents <= amount_cents)",
+            name="ck_refund_approved_amount_range",
+        ),
         Index("ix_refund_status_assignee", "status", "assigned_to_id"),
     )
+
+    @property
+    def refunded_cents(self) -> int:
+        """Money returned to the customer for an approved refund (full amount unless partially approved)."""
+        return self.approved_amount_cents if self.approved_amount_cents is not None else self.amount_cents
 
 
 class RefundEvent(Base):

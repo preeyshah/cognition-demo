@@ -39,9 +39,14 @@ def get_policies(db: Session) -> dict[str, int]:
     return values
 
 
+def refunded_cents_sum():
+    """SUM of money actually refunded (partial approvals count their approved amount)."""
+    return func.coalesce(func.sum(func.coalesce(RefundRequest.approved_amount_cents, RefundRequest.amount_cents)), 0)
+
+
 def approved_today_cents(db: Session, user_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(refunded_cents_sum()).where(
             RefundRequest.decided_by_id == user_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= start_of_day(),
@@ -51,7 +56,7 @@ def approved_today_cents(db: Session, user_id: int) -> int:
 
 def customer_30d_approved_cents(db: Session, customer_id: int) -> int:
     return db.scalar(
-        select(func.coalesce(func.sum(RefundRequest.amount_cents), 0)).where(
+        select(refunded_cents_sum()).where(
             RefundRequest.customer_id == customer_id,
             RefundRequest.status == RefundStatus.approved,
             RefundRequest.decided_at >= now_utc() - timedelta(days=30),
@@ -96,11 +101,13 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
     if acting:
         ctx = policy_context(db, user, refund, policies)
         approve = policy.check_approve(user, refund, ctx)
+        partial = approve.allowed and policy.can_approve_partial(user, refund, ctx)
         # Note length is validated at submit time; here we only check eligibility.
         reject = policy.check_reject(user, refund, ctx, "x" * 1000)
         escalate = policy.check_escalate(user, refund, ctx, "x" * 1000)
     else:
         approve = reject = escalate = policy.Decision(False, ["Read-only"])
+        partial = False
     history = policy.check_view_history(user, refund)
     return RefundOut(
         id=refund.id,
@@ -127,6 +134,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
         decided_by=_ref(refund.decided_by),
         decision_note=refund.decision_note,
         decided_at=refund.decided_at,
+        approved_amount_cents=refund.refunded_cents if refund.status == RefundStatus.approved else None,
         sla_due_at=refund.sla_due_at,
         overdue=is_overdue(refund),
         created_at=refund.created_at,
@@ -136,6 +144,7 @@ def serialize_refund(db: Session, user: User, refund: RefundRequest, policies: d
             can_escalate=escalate.allowed,
             can_view_history=history.allowed,
             can_assign=user.role == Role.admin and refund.status not in policy.TERMINAL,
+            can_approve_partial=partial,
             approve_blocked_reasons=[] if approve.allowed else approve.reasons,
             escalate_blocked_reasons=[] if escalate.allowed else escalate.reasons,
         ),

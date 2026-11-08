@@ -38,6 +38,13 @@ with TestClient(app) as client:  # lifespan runs init_db (create_all, analytics 
     assert res.status_code == 200, res.text
     au02 = next(c for c in res.json()["controls"] if c["id"] == "AU-02")
     assert au02["status"] == "pass" and au02["evidence"]["append_only_trigger"], au02
+    # Partial refund: admin approves less than requested; the payout and the BI view carry the approved amount.
+    admin_h = {"Authorization": f"Bearer {token}"}
+    esc = client.get("/refunds?status=escalated&limit=500", headers=admin_h).json()["items"]
+    target = next(r for r in esc if r["permissions"]["can_approve_partial"])
+    res = client.post(f"/refunds/{target['id']}/approve", headers=admin_h,
+                      json={"amount_cents": target["amount_cents"] // 2, "note": "partial smoke"})
+    assert res.status_code == 200 and res.json()["payout"]["amount_cents"] == target["amount_cents"] // 2, res.text
 
 # Queue: a ticket locked by another worker is skipped (SKIP LOCKED); the free one is processed.
 with SessionLocal() as db:
@@ -57,4 +64,7 @@ with SessionLocal() as db:
 with engine.connect() as conn:
     n = conn.execute(text("select count(*) from refund_requests")).scalar_one()
     assert n > 100, n
+    refunded, partial = conn.execute(text("select refunded_cents, is_partial from v_refund_facts where id = :i"),
+                                     {"i": target["id"]}).one()
+    assert partial and refunded == target["amount_cents"] // 2, (refunded, partial)
 print("postgres smoke ok:", n, "refunds")
