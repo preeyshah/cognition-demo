@@ -43,6 +43,22 @@ resource "aws_lb_listener" "http" {
   }
 }
 
+# Dev-only: when the ALB is public, forward all traffic without the origin-verify header.
+resource "aws_lb_listener_rule" "public" {
+  count        = var.allow_public_alb ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 5
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+  condition {
+    path_pattern {
+      values = ["/*"]
+    }
+  }
+}
+
 resource "aws_lb_listener_rule" "from_cloudfront" {
   listener_arn = aws_lb_listener.http.arn
   priority     = 10

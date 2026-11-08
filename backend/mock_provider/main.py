@@ -89,10 +89,13 @@ def history(external_id: str, x_api_key: str | None = Header(default=None)):
 
 # ---------------------------------------------------------------- payments API
 
-SandboxMode = Literal["outage", "decline", "async_fail", "lost_response", "drop_webhook"]
+SandboxMode = Literal["outage", "decline", "async_fail", "lost_response", "drop_webhook", "flaky_first"]
 REFUNDS: dict[str, dict] = {}
 IDEMPOTENCY: dict[str, tuple[str, int, dict]] = {}  # key -> (request hash, status code, body)
-SANDBOX: dict[str, int] = {"outage": 0, "decline": 0, "async_fail": 0, "lost_response": 0, "drop_webhook": 0}
+ATTEMPTS: dict[str, int] = {}
+SANDBOX: dict[str, int] = {"outage": 0, "decline": 0, "async_fail": 0, "lost_response": 0, "drop_webhook": 0,
+                  # armed high by default: every refund fails its first attempt once, then succeeds on retry
+                  "flaky_first": 1_000_000}
 _tasks: set[asyncio.Task] = set()
 
 
@@ -162,6 +165,12 @@ async def create_refund(
     if _take("outage"):
         return JSONResponse({"error": {"code": "service_unavailable", "message": "PayCore is temporarily unavailable"}},
                             status_code=503)
+    # Demo: first attempt per Idempotency-Key always fails once; the client retry (same key) succeeds.
+    if ATTEMPTS.get(idempotency_key, 0) == 0 and _take("flaky_first"):
+        ATTEMPTS[idempotency_key] = 1
+        return JSONResponse({"error": {"code": "service_unavailable", "message": "PayCore is temporarily unavailable"}},
+                            status_code=503)
+    ATTEMPTS[idempotency_key] = ATTEMPTS.get(idempotency_key, 0) + 1
     fingerprint = hashlib.sha256(body.model_dump_json().encode()).hexdigest()
     if idempotency_key in IDEMPOTENCY:
         seen_hash, code, stored = IDEMPOTENCY[idempotency_key]

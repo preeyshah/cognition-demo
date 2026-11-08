@@ -147,6 +147,12 @@ variable "cors_origins" {
   default     = ""
 }
 
+variable "allow_public_alb" {
+  description = "Dev escape hatch: allow the ALB to be reached directly (0.0.0.0/0, no origin-verify) while CloudFront is unavailable. Never enable on prod."
+  type        = bool
+  default     = false
+}
+
 variable "environment" {
   description = "Runtime mode passed to the API as ENVIRONMENT: 'prod' disables mock SSO + demo seed."
   type        = string

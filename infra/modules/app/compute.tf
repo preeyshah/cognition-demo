@@ -165,7 +165,7 @@ resource "aws_ecs_task_definition" "provider" {
     command      = ["uvicorn", "mock_provider.main:app", "--host", "0.0.0.0", "--port", "9000"]
     portMappings = [{ containerPort = 9000 }]
     # Webhooks go out through CloudFront like any external PSP's would (provider SG allows 443 egress).
-    environment = [{ name = "PAYMENTS_WEBHOOK_URL", value = "${local.app_origin}/api/webhooks/paycore" }]
+    environment = [{ name = "PAYMENTS_WEBHOOK_URL", value = var.allow_public_alb ? "http://${aws_lb.api.dns_name}/webhooks/paycore" : "${local.app_origin}/api/webhooks/paycore" }]
     secrets = [
       { name = "PROVIDER_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:PROVIDER_API_KEY::" },
       { name = "PAYMENTS_WEBHOOK_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:PAYMENTS_WEBHOOK_SECRET::" },
