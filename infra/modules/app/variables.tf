@@ -132,3 +132,59 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+# --- Environment sizing (dev sets these small; prod keeps the defaults) --------
+
+variable "environment" {
+  description = "Runtime mode passed to the API as ENVIRONMENT: 'prod' disables mock SSO + demo seed."
+  type        = string
+  default     = "prod"
+}
+
+variable "az_count" {
+  description = "Availability zones to spread subnets/NAT across (1 for the cheapest dev env)."
+  type        = number
+  default     = 2
+}
+
+variable "enable_nat_gateway" {
+  description = "NAT gateway for private subnets. Disable (with tasks_in_public_subnets) to save ~$32/mo on dev."
+  type        = bool
+  default     = true
+}
+
+variable "tasks_in_public_subnets" {
+  description = "Run ECS tasks in public subnets with public IPs (required when enable_nat_gateway = false)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_waf" {
+  description = "Attach the CloudFront WAF web ACL (managed rules + rate limits)."
+  type        = bool
+  default     = true
+}
+
+variable "enable_autoscaling" {
+  description = "Application Auto Scaling policies for the api service."
+  type        = bool
+  default     = true
+}
+
+variable "enable_backup" {
+  description = "AWS Backup plans/vaults incl. the cross-region copy (and the aws.dr provider usage)."
+  type        = bool
+  default     = true
+}
+
+variable "db_deletion_protection" {
+  description = "RDS deletion protection + final snapshot on destroy."
+  type        = bool
+  default     = true
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Skip the final snapshot when the instance is destroyed (dev only)."
+  type        = bool
+  default     = false
+}

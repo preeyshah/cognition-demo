@@ -14,8 +14,9 @@ authorization and auditability over style.
 - `backend/app/compliance.py`: controls must not be weakened, skipped or special-cased to pass.
 - `backend/app/remediation.py`: tickets go through the Postgres queue (`FOR UPDATE SKIP LOCKED`); flag direct Devin
   API calls from request handlers, secrets in prompts or responses, and missing `DEVIN_MAX_ACU` caps.
-- `infra/` and `.github/workflows/`: no public database access, no long-lived AWS keys (GitHub OIDC only), WAF and
-  CloudFront origin protection kept, `branch-flow.yml` not bypassed.
+- `infra/` and `.github/workflows/`: no public database access, WAF and CloudFront origin protection kept on prod,
+  `branch-flow.yml` not bypassed. Deploys authenticate with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo
+  secrets (bootstrap can mint GitHub OIDC roles for keyless CI instead).
 
 ## Conventions
 - Behaviour changes need tests in `backend/tests/` (or `frontend/e2e/` for UI flows) and must keep CI green:

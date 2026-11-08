@@ -1,4 +1,5 @@
 resource "aws_wafv2_web_acl" "edge" {
+  count       = var.enable_waf ? 1 : 0
   provider    = aws.us_east_1
   name        = var.name
   scope       = "CLOUDFRONT"

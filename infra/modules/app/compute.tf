@@ -87,8 +87,10 @@ resource "aws_iam_role" "task" {
 }
 
 locals {
-  image      = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
-  app_origin = "https://${aws_cloudfront_distribution.main.domain_name}"
+  image            = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
+  app_origin       = "https://${aws_cloudfront_distribution.main.domain_name}"
+  tasks_subnets    = var.tasks_in_public_subnets ? module.vpc.public_subnets : module.vpc.private_subnets
+  assign_public_ip = var.tasks_in_public_subnets
   log_config = {
     logDriver = "awslogs"
     options = {
@@ -130,7 +132,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "ALLOWED_REDIRECT_ORIGINS", value = local.app_origin },
       { name = "CORS_ORIGINS", value = local.app_origin },
       { name = "TRUSTED_PROXY_HOPS", value = "2" }, # CloudFront -> ALB
-      { name = "ENVIRONMENT", value = "prod" },
+      { name = "ENVIRONMENT", value = var.environment },
       { name = "DEVIN_REPO", value = var.github_repo },
       { name = "DEVIN_MAX_ACU", value = tostring(var.devin_max_acu) },
     ]
@@ -185,9 +187,9 @@ resource "aws_ecs_service" "api" {
     ignore_changes = [desired_count]
   }
   network_configuration {
-    subnets          = module.vpc.private_subnets
+    subnets          = local.tasks_subnets
     security_groups  = [aws_security_group.api.id]
-    assign_public_ip = false
+    assign_public_ip = local.assign_public_ip
   }
   load_balancer {
     target_group_arn = aws_lb_target_group.api.arn
@@ -208,9 +210,9 @@ resource "aws_ecs_service" "provider" {
   desired_count   = 1
   launch_type     = "FARGATE"
   network_configuration {
-    subnets          = module.vpc.private_subnets
+    subnets          = local.tasks_subnets
     security_groups  = [aws_security_group.provider.id]
-    assign_public_ip = false
+    assign_public_ip = local.assign_public_ip
   }
   service_registries {
     registry_arn = aws_service_discovery_service.provider.arn
