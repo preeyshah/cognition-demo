@@ -5,6 +5,16 @@ an engineering team can replace a low-code platform such as Microsoft Power Apps
 owned, version-controlled code — without giving up the things that make low-code attractive: speed, role-based
 screens, approvals, connectors and analytics.
 
+## Live environments (already deployed — no setup required)
+
+| Environment | URL | Notes |
+| --- | --- | --- |
+| **dev** | https://d2eah532twinmd.cloudfront.net | Seeded demo data, mock SSO, mock PayCore with retries |
+| **prod** | https://d2r4c05e3dgv73.cloudfront.net | Empty DB (`ENVIRONMENT=prod` disables seed); real OIDC provider still to be wired |
+
+Both are Terraform-managed AWS stacks (CloudFront + S3 + ECS Fargate + RDS Postgres) deployed by GitHub Actions —
+see [AWS infrastructure](#aws-infrastructure-infra-terraform) below. Log in on dev with any seeded user via the mock SSO picker.
+
 | Power Apps capability | How it's done here |
 | --- | --- |
 | Role-based screens | One React app; navigation, data and buttons change per role (admin / reviewer / viewer) |
