@@ -45,6 +45,16 @@ resource "aws_security_group" "alb" {
     prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
   }
 
+  dynamic "ingress" {
+    for_each = var.allow_public_alb ? [1] : []
+    content {
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
   egress {
     from_port   = 8000
     to_port     = 8000

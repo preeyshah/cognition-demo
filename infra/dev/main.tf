@@ -77,6 +77,7 @@ module "app" {
   enable_waf               = false
   enable_autoscaling       = false
   enable_backup            = false
+  allow_public_alb         = true # dev only: reachable without CloudFront (still unverified on this account)
   api_desired_count        = 1
   api_min_count            = 1
   api_max_count            = 1
