@@ -20,7 +20,14 @@ export function DecisionModal({ refund, action, onClose, onDone }: { refund: Ref
   const c = copy[action]
   const partialAllowed = action === 'approve' && refund.permissions.can_approve_partial
   const amountCents = toCents(amount)
-  const partial = partialAllowed && amountCents !== refund.amount_cents
+  const amountError = !partialAllowed
+    ? null
+    : !/^\d+(\.\d{1,2})?$/.test(amount.trim()) || amountCents <= 0
+      ? 'Enter a positive amount in dollars, e.g. 125.50'
+      : amountCents > refund.amount_cents
+        ? 'Cannot exceed the requested amount'
+        : null
+  const partial = partialAllowed && !amountError && amountCents !== refund.amount_cents
   const submit = async () => {
     setBusy(true)
     setError(null)
@@ -43,6 +50,7 @@ export function DecisionModal({ refund, action, onClose, onDone }: { refund: Ref
         <label className="field" style={{ marginBottom: 12 }}>
           Refund amount (USD) · admins can approve a partial refund
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" data-testid="decision-amount" />
+          {amountError ? <span className="error" data-testid="decision-amount-error">{amountError}</span> : null}
           {partial ? <span className="muted">Partial refund: {money(amountCents)} of {money(refund.amount_cents)} requested</span> : null}
         </label>
       ) : null}
@@ -51,7 +59,7 @@ export function DecisionModal({ refund, action, onClose, onDone }: { refund: Ref
       <p className="muted">Recorded in the refund timeline and the append-only audit log.</p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className={`btn ${c.cls}`} disabled={busy} onClick={submit} data-testid="decision-confirm">
+        <button className={`btn ${c.cls}`} disabled={busy || !!amountError} onClick={submit} data-testid="decision-confirm">
           {busy ? 'Saving…' : partial ? `${c.cta} ${money(amountCents)}` : c.cta}
         </button>
       </div>
