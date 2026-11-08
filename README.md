@@ -18,6 +18,16 @@ screens, approvals, connectors and analytics.
 | Inherited compliance (Microsoft trust portal) | *Compliance Center*: controls-as-code mapped to SOC 2 / PCI DSS 4.0 / SOX ITGC / GDPR, checked live, exportable evidence pack, failing controls handed to Devin |
 | Hosting | `docker compose up` — Postgres, API, mock provider and static frontend behind nginx |
 
+## Why owned code instead of low-code
+
+| Advantage | What it means here |
+| --- | --- |
+| **Low cost** | No per-user or premium-connector licences: the stack is open source (React, FastAPI, PostgreSQL). The AWS deployment defaults to small, autoscaled resources — a `db.t4g.micro` Postgres and 0.5 vCPU / 1 GB Fargate tasks scaling between `api_min_count` (2) and `api_max_count` (8) — all Terraform variables. Locally it runs on any Postgres with `docker compose up` or `./setup.sh`. |
+| **Low maintenance** | Every change goes through CI (ruff, pytest, a Postgres smoke test, oxlint, `tsc`, Docker builds, `terraform validate`) and the `dev` → `main` promotion flow; deploys are automated with ECS auto-rollback. The [self-healing loop](#self-healing-loop-devin) turns production errors, guardrail alerts and failing compliance controls into Devin sessions that open fix PRs, and the [Compliance Center](#compliance-center) checks controls continuously instead of in an annual audit scramble. |
+| **High iteration speed** | Support tickets (`POST /support/requests`), production errors and failing compliance controls are queued and handed to Devin, which reproduces the issue with a test, fixes it and opens a PR against `dev`. Merging to `dev` deploys the dev environment, so a request can go from idea to running software in one review cycle. |
+| **High flexibility** | Plain code has no delegation limits, formula language or connector ceilings: policy logic lives in [`backend/app/policy.py`](backend/app/policy.py), data in a normal Postgres schema with BI views, and infrastructure in Terraform. Swap the identity provider, payment provider or database host with configuration rather than a platform migration. |
+| **Easy third-party connections** | An integration is an authenticated HTTP client plus config: the customer-history API ([`history_client.py`](backend/app/history_client.py), `HISTORY_PROVIDER_URL`/`HISTORY_PROVIDER_API_KEY`), the PayCore payments API with signed webhooks ([`payments_client.py`](backend/app/payments_client.py)), the Devin API ([`remediation.py`](backend/app/remediation.py)) and OIDC SSO. Secrets come from Secrets Manager on AWS; the BI views and CSV export plug into any reporting tool. |
+
 ## What it does
 
 **Reviewer** (`jordan.lee`, `sam.patel`, `maria.gomez`)
