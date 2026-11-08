@@ -22,7 +22,7 @@ SELECT
     (COALESCE(r.decided_at, now()) > r.sla_due_at) AS sla_breached,
     date_trunc('day', r.created_at) AS created_day,
     CASE WHEN r.status = 'approved' THEN COALESCE(r.approved_amount_cents, r.amount_cents) END AS refunded_cents,
-    (r.approved_amount_cents < r.amount_cents) AS is_partial
+    COALESCE(r.approved_amount_cents < r.amount_cents, false) AS is_partial
 FROM refund_requests r
 JOIN customers c ON c.id = r.customer_id
 LEFT JOIN users a ON a.id = r.assigned_to_id
