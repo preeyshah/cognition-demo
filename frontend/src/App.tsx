@@ -4,6 +4,7 @@ import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import type { User } from './api'
 import { useAuth } from './auth'
 import { RoleBadge, Spinner } from './components/ui'
+import { RequestFeature } from './components/RequestFeature'
 import { money } from './format'
 import { AllRefunds, AuditLog, Escalations, Policies, SupportTickets, Team, ViewAs } from './pages/Admin'
 import { Analytics } from './pages/Analytics'
@@ -69,6 +70,7 @@ export default function App() {
                 </div>
               </div>
               <RoleBadge role={user.role} />
+              <RequestFeature />
               <button className="btn sm ghost-dark" onClick={logout}>Sign out</button>
             </div>
           </div>

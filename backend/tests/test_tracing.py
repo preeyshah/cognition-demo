@@ -110,6 +110,20 @@ def test_support_request_flow(client, db, monkeypatch):
     assert "open a PR" in sent["prompt"] and "Approve button greyed out" in sent["prompt"]
 
 
+def test_support_request_kinds(client, db):
+    j = user(db, JORDAN)
+    res = client.post("/support/requests", headers=auth(j),
+                      json={"kind": "feature", "title": "Bulk approve refunds under $50"})
+    assert res.status_code == 201
+    assert res.json()["kind"] == "feature" and res.json()["status"] == "open"  # Devin not configured in tests
+    assert client.post("/support/requests", headers=auth(j),
+                       json={"kind": "bogus", "title": "not a real kind"}).status_code == 422
+
+    sr = db.get(SupportRequest, res.json()["id"])
+    prompt = remediation.build_prompt(sr, None)
+    assert "feature request" in prompt and "implement the requested change" in prompt
+
+
 def test_admin_remediate_queues_ticket_for_worker(client, db, monkeypatch):
     admin = user(db, "priya.admin@acmepay.com")
     sr_id = client.post("/support/requests", headers=auth(admin), json={"title": "Export is empty"}).json()["id"]

@@ -166,3 +166,24 @@ export interface AuthConfig {
 }
 
 export const getAuthConfig = () => api<AuthConfig>('/auth/config')
+
+export interface SupportTicket {
+  id: number
+  kind: string
+  title: string
+  description: string
+  trace_id: string | null
+  reporter_email: string | null
+  status: string
+  devin_session_url: string | null
+  remediation_error: string | null
+  created_at: string
+}
+
+export const createSupportRequest = (body: { kind: 'feature' | 'support'; title: string; description?: string }) =>
+  api<SupportTicket>('/support/requests', 'POST', body)
+
+export const listSupportTickets = (status?: string) =>
+  api<SupportTicket[]>(`/admin/support/requests${status ? `?status=${status}` : ''}`)
+
+export const remediateTicket = (id: number) => api<SupportTicket>(`/admin/support/requests/${id}/remediate`, 'POST')

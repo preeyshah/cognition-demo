@@ -52,7 +52,12 @@ def trace_bundle(db: Session, trace_id: str) -> dict:
     }
 
 
-_KIND_LABEL = {"error": "production error", "compliance": "failing compliance control", "guardrail": "guardrail alert"}
+_KIND_LABEL = {
+    "error": "production error",
+    "feature": "feature request",
+    "compliance": "failing compliance control",
+    "guardrail": "guardrail alert",
+}
 
 
 def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
@@ -81,9 +86,15 @@ def build_prompt(sr: SupportRequest, bundle: dict | None) -> str:
         "Investigate the root cause, reproduce it with a failing test in backend/tests where possible, fix it, "
         "make sure CI (ruff, pytest, frontend lint/build) passes, and open a PR against "
         f"{s.devin_base_branch} that references "
-        f"support request #{sr.id} and trace {sr.trace_id or '-'}. Do not weaken any authorization checks or limits. "
-        "If it is not a code defect (e.g. a user question or expected policy denial), do not open a PR; "
-        "explain why in the session instead.",
+        f"request #{sr.id} and trace {sr.trace_id or '-'}. Do not weaken any authorization checks or limits. "
+        + (
+            "This is a feature request: implement the requested change end-to-end (backend, frontend, tests, "
+            "README if behaviour changes) following existing conventions. "
+            if sr.kind == "feature"
+            else ""
+        )
+        + "If it is not a code defect or a reasonable feature (e.g. a user question or expected policy denial), "
+        "do not open a PR; explain why in the session instead.",
     ]
     return "\n".join(lines)
 

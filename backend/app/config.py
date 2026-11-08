@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     devin_base_branch: str = "dev"  # auto-fix PRs land on dev; promote via dev → main
     devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
+    auto_remediate_requests: bool = True  # UI feature/problem submissions go straight to Devin
     remediation_cooldown_minutes: int = 60
     remediation_worker_enabled: bool = True  # drains queued tickets to Devin
     remediation_poll_seconds: float = 10.0

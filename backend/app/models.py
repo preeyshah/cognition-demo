@@ -200,7 +200,7 @@ class SupportRequest(Base):
     __tablename__ = "support_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "error" | "guardrail" | "compliance"
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "feature" | "error" | "guardrail" | "compliance"
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
