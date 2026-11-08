@@ -27,6 +27,12 @@ variable "dr_region" {
   default = "us-west-2"
 }
 
+variable "image_tag" {
+  description = "Backend image tag in ECR (set to the commit SHA by the deploy workflow)."
+  type        = string
+  default     = "latest"
+}
+
 provider "aws" {
   region = var.region
   default_tags {
@@ -55,13 +61,19 @@ provider "aws" {
 module "app" {
   source = "../modules/app"
 
-  name   = var.name
-  region = var.region
+  image_tag = var.image_tag
+  name      = var.name
+  region    = var.region
 
   # Same wildcard as dev so api tasks don't depend on the distribution existing; tighten to
   # the exact origin (or a custom domain) once CloudFront is verified and stable.
   allowed_redirect_origins = "https://*.cloudfront.net"
   cors_origins             = "https://*.cloudfront.net"
+
+  # Free-tier account limits: single-AZ only and short backup retention. Re-enable
+  # multi_az / longer retention after upgrading the account plan.
+  db_multi_az              = false
+  db_backup_retention_days = 1
 
   providers = {
     aws           = aws

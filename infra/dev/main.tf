@@ -28,6 +28,12 @@ variable "dr_region" {
   default = "us-west-2"
 }
 
+variable "image_tag" {
+  description = "Backend image tag in ECR (set to the commit SHA by the deploy workflow)."
+  type        = string
+  default     = "latest"
+}
+
 provider "aws" {
   region = var.region
   default_tags {
@@ -54,6 +60,7 @@ provider "aws" {
 module "app" {
   source = "../modules/app"
 
+  image_tag   = var.image_tag
   name        = var.name
   region      = var.region
   environment = "dev" # mock SSO + demo seed enabled, like docker compose
