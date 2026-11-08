@@ -29,6 +29,29 @@ export interface Permissions {
   escalate_blocked_reasons: string[]
 }
 
+export type PayoutStatus = 'queued' | 'retry_scheduled' | 'processing' | 'succeeded' | 'failed'
+
+export interface Payout {
+  id: number
+  provider: string
+  status: PayoutStatus
+  amount_cents: number
+  currency: string
+  provider_refund_id: string | null
+  idempotency_key: string
+  attempts: number
+  manual_retries: number
+  next_attempt_at: string | null
+  last_http_status: number | null
+  last_error: string | null
+  failure_code: string | null
+  succeeded_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const payoutInFlight = (p: Payout | null | undefined) => !!p && p.status !== 'succeeded' && p.status !== 'failed'
+
 export interface Refund {
   id: number
   reference: string
@@ -51,6 +74,7 @@ export interface Refund {
   overdue: boolean
   created_at: string
   permissions: Permissions
+  payout: Payout | null
 }
 
 export interface RefundEvent {
@@ -123,13 +147,15 @@ export async function api<T = unknown>(path: string, method = 'GET', body?: unkn
   return (await request(path, method, body)).json() as Promise<T>
 }
 
-export async function download(path: string, filename: string) {
-  const blob = await (await request(path)).blob()
+export async function download(path: string, filename: string): Promise<Headers> {
+  const res = await request(path)
+  const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
+  return res.headers
 }
 
 export const ssoLoginUrl = (redirectUri: string) => `${API_URL}/auth/sso/login?redirect_uri=${encodeURIComponent(redirectUri)}`
@@ -140,3 +166,24 @@ export interface AuthConfig {
 }
 
 export const getAuthConfig = () => api<AuthConfig>('/auth/config')
+
+export interface SupportTicket {
+  id: number
+  kind: string
+  title: string
+  description: string
+  trace_id: string | null
+  reporter_email: string | null
+  status: string
+  devin_session_url: string | null
+  remediation_error: string | null
+  created_at: string
+}
+
+export const createSupportRequest = (body: { kind: 'feature' | 'support'; title: string; description?: string }) =>
+  api<SupportTicket>('/support/requests', 'POST', body)
+
+export const listSupportTickets = (status?: string) =>
+  api<SupportTicket[]>(`/admin/support/requests${status ? `?status=${status}` : ''}`)
+
+export const remediateTicket = (id: number) => api<SupportTicket>(`/admin/support/requests/${id}/remediate`, 'POST')

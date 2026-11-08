@@ -5,6 +5,8 @@ from urllib.parse import quote
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEMO_WEBHOOK_SECRET = "whsec_demo_only"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -40,11 +42,27 @@ class Settings(BaseSettings):
     devin_base_branch: str = "dev"  # auto-fix PRs land on dev; promote via dev → main
     devin_max_acu: int = 10  # hard cost cap per auto-remediation session
     auto_remediate_errors: bool = True
+    auto_remediate_requests: bool = True  # UI feature/problem submissions go straight to Devin
     remediation_cooldown_minutes: int = 60
+    remediation_worker_enabled: bool = True  # drains queued tickets to Devin
+    remediation_poll_seconds: float = 10.0
 
     history_provider_url: str = "http://localhost:9000"
     history_provider_api_key: str = "demo-provider-key"
     history_provider_timeout_s: float = 3.0
+
+    # Payments provider (PayCore) used to actually move the money once a refund is approved.
+    payments_provider_url: str = "http://localhost:9000"
+    payments_provider_api_key: str = "demo-provider-key"
+    payments_webhook_secret: str = DEMO_WEBHOOK_SECRET  # shared with the provider; set from a secret store
+    payments_webhook_tolerance_s: int = 300  # reject stale/replayed webhook signatures
+    payments_timeout_s: float = 5.0
+    payments_sandbox_controls: bool = True  # admin UI can inject provider failures (sandbox only)
+    payout_max_attempts: int = 5
+    payout_retry_base_s: float = 2.0
+    payout_retry_max_s: float = 60.0
+    payout_worker_enabled: bool = True
+    payout_worker_interval_s: float = 2.0
 
     # Dev-only mock second factor on the SSO picker; ignored when ENVIRONMENT=prod.
     mock_mfa_code: str = "123456"
@@ -53,6 +71,13 @@ class Settings(BaseSettings):
     # support ticket that the remediation loop hands to Devin. 0 disables the alert.
     guardrail_alert_threshold: int = 50
     guardrail_alert_window_minutes: int = 10
+
+    # Compliance Center thresholds (see app/compliance.py for the framework mapping).
+    audit_retention_days: int = 400  # PCI DSS 10.5.1: >= 12 months
+    access_review_interval_days: int = 90  # quarterly; PCI DSS 7.2.4 requires at least every 6 months
+    dormant_account_days: int = 90  # PCI DSS 8.2.6
+    dsar_due_days: int = 30  # GDPR Art. 12(3): one month
+    session_idle_limit_minutes: int = 15  # PCI DSS 8.2.8
 
     seed_on_startup: bool = True
 
@@ -72,6 +97,11 @@ class Settings(BaseSettings):
         # Demo data (users, customers, refunds) must never appear in prod unless explicitly requested.
         if self.environment == "prod" and "seed_on_startup" not in self.model_fields_set:
             self.seed_on_startup = False
+        # Provider failure injection is a sandbox demo tool; never expose it in prod by default.
+        if self.environment == "prod" and self.payments_webhook_secret == DEMO_WEBHOOK_SECRET:
+            raise ValueError("PAYMENTS_WEBHOOK_SECRET must be set when ENVIRONMENT=prod")
+        if self.environment == "prod" and "payments_sandbox_controls" not in self.model_fields_set:
+            self.payments_sandbox_controls = False
         return self
 
     @property

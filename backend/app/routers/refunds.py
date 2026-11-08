@@ -1,13 +1,13 @@
 from datetime import timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from .. import policy
+from .. import payouts, policy
 from ..audit import audit, deny
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..history_client import fetch_customer_history
 from ..models import (
     Customer,
@@ -155,7 +155,14 @@ def get_refund(refund_id: int, request: Request, user: User = Depends(get_curren
     return RefundDetailOut(**base.model_dump(), events=[serialize_event(e) for e in events])
 
 
-def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, user: User, db: Session) -> RefundOut:
+def _dispatch_payout(payout_id: int) -> None:
+    """First provider attempt right after the response is sent; the worker handles retries."""
+    with SessionLocal() as db:
+        payouts.attempt(db, payout_id)
+
+
+def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, user: User, db: Session,
+            background: BackgroundTasks | None = None) -> RefundOut:
     refund = _load_visible(db, request, user, refund_id, lock=True)
     ctx = policy_context(db, user, refund)
     if action == "approve":
@@ -182,17 +189,21 @@ def _decide(action: str, refund_id: int, body: DecisionIn, request: Request, use
         refund.decided_at = now_utc()
         refund.decision_note = note
     _event(db, refund, user, action + ("d" if action.endswith("e") else "ed"), previous, note,
-           amount_cents=refund.amount_cents)
+           amount_cents=refund.amount_cents, actor_role=user.role.value)
+    payout = payouts.enqueue(db, refund, user) if action == "approve" else None
     audit(db, request, user, f"refund.{action}", "refund", refund.id, amount_cents=refund.amount_cents,
           from_status=previous.value, to_status=refund.status.value)
     db.commit()
+    if payout is not None and background is not None:
+        background.add_task(_dispatch_payout, payout.id)
     db.refresh(refund)
     return serialize_refund(db, user, refund)
 
 
 @router.post("/{refund_id}/approve", response_model=RefundOut)
-def approve(refund_id: int, body: DecisionIn, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _decide("approve", refund_id, body, request, user, db)
+def approve(refund_id: int, body: DecisionIn, request: Request, background: BackgroundTasks,
+            user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _decide("approve", refund_id, body, request, user, db, background)
 
 
 @router.post("/{refund_id}/reject", response_model=RefundOut)

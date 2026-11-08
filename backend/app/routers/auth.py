@@ -150,7 +150,7 @@ def sso_mfa(
 @router.post("/token", response_model=TokenOut)
 def exchange_code(body: TokenIn, request: Request, db: Session = Depends(get_db)):
     payload = decode_token(body.code, typ="sso_code")
-    if not consume_code(payload):
+    if not consume_code(db, payload):
         raise HTTPException(status_code=401, detail="Authorization code already used")
     user = db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import remediation
 from ..audit import audit
+from ..config import get_settings
 from ..db import get_db
 from ..models import RefundRequest, RequestTrace, Role, SupportRequest, User
 from ..security import get_current_user, require_roles
@@ -16,6 +17,7 @@ admin_only = require_roles(Role.admin)
 
 
 class SupportIn(BaseModel):
+    kind: str = Field(default="support", pattern="^(feature|support)$")
     title: str = Field(min_length=5, max_length=200)
     description: str = Field(default="", max_length=5000)
     trace_id: str | None = Field(default=None, max_length=64)
@@ -74,13 +76,26 @@ def get_trace(trace_id: str, _: User = Depends(admin_only), db: Session = Depend
 def create_support_request(
     body: SupportIn, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    sr = SupportRequest(kind="support", title=body.title, description=body.description,
+    sr = SupportRequest(kind=body.kind, title=body.title, description=body.description,
                         trace_id=body.trace_id, reporter_email=user.email)
     db.add(sr)
     db.flush()
-    audit(db, request, user, "support.create", "support_request", sr.id, trace=body.trace_id)
+    audit(db, request, user, "support.create", "support_request", sr.id, kind=body.kind, trace=body.trace_id)
+    auto = get_settings().auto_remediate_requests and remediation.enabled()
+    if auto:
+        sr.status = "queued"
     db.commit()
+    if auto:
+        remediation.notify()
     return _support_out(sr)
+
+
+@router.get("/admin/support/config")
+def support_config(_: User = Depends(admin_only)):
+    """Whether tickets are handed to Devin, and where its PRs go (no secrets)."""
+    s = get_settings()
+    return {"devin_enabled": remediation.enabled(), "auto_remediate_errors": s.auto_remediate_errors,
+            "repo": s.devin_repo, "base_branch": s.devin_base_branch, "max_acu": s.devin_max_acu}
 
 
 @router.get("/admin/support/requests")
@@ -106,5 +121,5 @@ def remediate_support_request(
     sr.status = "queued"
     audit(db, request, user, "support.remediate", "support_request", sr.id)
     db.commit()
-    remediation.remediate_async(sr.id)
+    remediation.notify()
     return _support_out(sr)

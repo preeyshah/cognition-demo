@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Customer,
+    DataSubjectRequest,
+    Payout,
+    PayoutStatus,
     PolicySetting,
     RefundEvent,
     RefundReason,
@@ -29,6 +32,8 @@ USERS = [
     ("maria.gomez@acmepay.com", "Maria Gomez", Role.reviewer, 2_500, 20_000),
     ("vik.auditor@acmepay.com", "Vik Mehta", Role.viewer, 0, 0),
 ]
+
+DORMANT_USER = ("dana.brooks@contractor.acmepay.com", "Dana Brooks (contractor)")
 
 FIRST = ["Olivia", "Liam", "Emma", "Noah", "Ava", "Ethan", "Sophia", "Mason", "Isabella", "Lucas",
          "Mia", "Arjun", "Chen", "Fatima", "Diego", "Hana", "Kwame", "Lena", "Omar", "Zoe"]
@@ -63,6 +68,7 @@ def seed(db: Session) -> None:
             db.add(PolicySetting(key=key, value=value, description=desc))
     db.flush()
     if db.scalar(select(User.id).limit(1)):
+        seed_compliance_findings(db)
         db.commit()
         return
 
@@ -133,6 +139,13 @@ def seed(db: Session) -> None:
             events.append((r.status.value, admin.id, "escalated", r.status.value, r.decision_note, t))
         db.add(r)
         db.flush()
+        if r.status == RefundStatus.approved:
+            paid_at = min(t + timedelta(minutes=2 + r.id % 25), now - timedelta(minutes=1))  # keep rng sequence stable
+            db.add(Payout(refund_id=r.id, idempotency_key=f"refund-{r.reference}", provider_refund_id=f"re_seed{r.id:05d}",
+                          amount_cents=amount, currency="USD", status=PayoutStatus.succeeded, attempts=1,
+                          last_http_status=201, succeeded_at=paid_at, created_at=t, updated_at=paid_at))
+            events.append(("payout_succeeded", None, r.status.value, r.status.value,
+                           "Money returned to customer (confirmed by webhook)", paid_at))
         for etype, actor, frm, to, note, ts in events:
             db.add(RefundEvent(refund_id=r.id, actor_id=actor, event_type=etype, from_status=frm, to_status=to,
                                note=note, data={"amount_cents": amount}, created_at=ts))
@@ -160,4 +173,32 @@ def seed(db: Session) -> None:
     # Open auto-escalations awaiting an admin: high risk and above every reviewer's limit.
     for hours, amount, risk in [(2, 42_000, 84), (9, 18_500, 77), (14, 380_000, 35), (26, 615_000, 52)]:
         make(now - timedelta(hours=hours), rng.choice(customers), amount, risk, rng.choice(list(RefundReason)), force_open=True)
+    seed_compliance_findings(db)
+    # One payout the provider bounced after accepting it, so the Payouts page has something to re-drive.
+    db.flush()
+    failed = db.scalars(select(Payout).order_by(Payout.succeeded_at.desc()).limit(1)).first()
+    if failed:
+        failed.status, failed.succeeded_at = PayoutStatus.failed, None
+        failed.failure_code, failed.last_error = "account_closed", "Refund failed at provider after it was accepted"
+        db.query(RefundEvent).filter_by(refund_id=failed.refund_id, event_type="payout_succeeded").delete()
+        db.add(RefundEvent(refund_id=failed.refund_id, event_type="payout_failed", from_status="approved",
+                           to_status="approved", note="Payout failed: account_closed — customer's account is closed",
+                           data={"failure_code": "account_closed"}, created_at=failed.updated_at))
     db.commit()
+
+
+def seed_compliance_findings(db: Session) -> None:
+    """Realistic audit findings for the Compliance Center demo (idempotent; added once, then left alone)."""
+    now = now_utc()
+    if db.scalar(select(User).where(User.email == DORMANT_USER[0])) is None:
+        # A contractor who left months ago but was never offboarded: fails the dormant-account control.
+        db.add(User(email=DORMANT_USER[0], name=DORMANT_USER[1], role=Role.viewer, approval_limit_cents=0,
+                    daily_approval_limit_cents=0, created_at=now - timedelta(days=400),
+                    last_login_at=now - timedelta(days=137)))
+    customer = db.scalar(select(Customer).where(Customer.external_id == "cus_1007"))
+    if customer is not None and db.scalar(select(DataSubjectRequest.id).limit(1)) is None:
+        # An erasure request that slipped past the 30-day GDPR deadline.
+        db.add(DataSubjectRequest(customer_id=customer.id, kind="erasure", requested_by_email="privacy@acmepay.com",
+                                  note="Customer emailed privacy@ asking for their data to be deleted.",
+                                  created_at=now - timedelta(days=34), due_at=now - timedelta(days=4)))
+    db.flush()

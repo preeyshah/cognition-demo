@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { api, type Refund, type RefundEvent } from '../api'
+import { api, payoutInFlight, type Payout, type Refund, type RefundEvent } from '../api'
 import { dateTime, humanize, money, timeAgo } from '../format'
 import { CustomerHistory, type Action } from './RefundActions'
-import { Badge, Drawer, ErrorBox, RiskBadge, Spinner, StatusBadge } from './ui'
+import { Badge, Drawer, ErrorBox, PayoutBadge, RiskBadge, Spinner, StatusBadge } from './ui'
 
 export function RefundDrawer({
   refund,
@@ -20,16 +20,28 @@ export function RefundDrawer({
 }) {
   const [tab, setTab] = useState<'details' | 'timeline' | 'history'>('details')
   const [events, setEvents] = useState<RefundEvent[] | null>(null)
+  const [livePayout, setLivePayout] = useState<Payout | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const p = refund.permissions
   const open = refund.status === 'pending' || refund.status === 'escalated'
+  const payout = livePayout === undefined ? refund.payout : livePayout
+  const polling = payoutInFlight(payout)
 
   useEffect(() => {
     if (readOnly) return
-    api<{ events: RefundEvent[] }>(`/refunds/${refund.id}`)
-      .then((d) => setEvents(d.events))
-      .catch((e) => setError(e.message))
-  }, [refund.id, refund.status, readOnly])
+    const load = () =>
+      api<{ events: RefundEvent[]; payout: Payout | null }>(`/refunds/${refund.id}`)
+        .then((d) => {
+          setEvents(d.events)
+          setLivePayout(d.payout)
+        })
+        .catch((e) => setError(e.message))
+    load()
+    // While the provider is still working on the refund, follow it live (worker retries, webhook).
+    if (!polling) return
+    const t = setInterval(load, 2000)
+    return () => clearInterval(t)
+  }, [refund.id, refund.status, readOnly, polling])
 
   return (
     <Drawer
@@ -80,6 +92,23 @@ export function RefundDrawer({
           {refund.escalation_reason ? (<><dt>Escalation</dt><dd>{refund.escalated_by ? `${refund.escalated_by.name}: ` : ''}{refund.escalation_reason}</dd></>) : null}
           {refund.decided_by ? (<><dt>Decision</dt><dd>{humanize(refund.status)} by {refund.decided_by.name} · {refund.decided_at ? dateTime(refund.decided_at) : ''}</dd></>) : null}
           {refund.decision_note ? (<><dt>Decision note</dt><dd>{refund.decision_note}</dd></>) : null}
+          {payout ? (
+            <>
+              <dt>Payout</dt>
+              <dd data-testid="payout-status">
+                <PayoutBadge payout={payout} /> via {payout.provider === 'paycore' ? 'PayCore' : payout.provider}
+                {payout.provider_refund_id ? <span className="muted"> · {payout.provider_refund_id}</span> : null}
+                {polling ? <span className="muted"> · live</span> : null}
+                <div className="muted">
+                  {payout.attempts} attempt{payout.attempts === 1 ? '' : 's'}
+                  {payout.status === 'retry_scheduled' && payout.next_attempt_at ? ` · next ${timeAgo(payout.next_attempt_at)} (last: ${payout.last_error ?? 'error'})` : ''}
+                  {payout.succeeded_at ? ` · paid ${dateTime(payout.succeeded_at)}` : ''}
+                  {payout.failure_code ? ` · ${payout.failure_code}${payout.last_error ? `: ${payout.last_error}` : ''}` : ''}
+                </div>
+                <div className="muted">Idempotency key <code>{payout.idempotency_key}</code></div>
+              </dd>
+            </>
+          ) : null}
         </dl>
       ) : null}
 

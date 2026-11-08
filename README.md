@@ -12,9 +12,21 @@ screens, approvals, connectors and analytics.
 | Entra ID / SSO | Mock OIDC authorization-code flow (`/auth/sso/*`, dev only) → swap in Okta / Entra / Google with config |
 | Dataverse tables | PostgreSQL schema via SQLAlchemy models, constraints and indexes |
 | Connectors | Authenticated HTTP client to a third-party "PayCore" customer-history API (mocked, with API key) |
+| Moving money through a provider | Approved refunds are paid back through PayCore's refunds API: idempotency keys, retries with backoff, HMAC-signed webhooks, reconciliation ([below](#payouts-through-a-payments-provider)) |
 | Power BI dashboards | Analytics page (Recharts), CSV export, Postgres BI views (`v_refund_facts`, …) |
 | Environment governance / auditing | Append-only audit log (DB trigger), every allowed **and denied** action is recorded |
+| Inherited compliance (Microsoft trust portal) | *Compliance Center*: controls-as-code mapped to SOC 2 / PCI DSS 4.0 / SOX ITGC / GDPR, checked live, exportable evidence pack, failing controls handed to Devin |
 | Hosting | `docker compose up` — Postgres, API, mock provider and static frontend behind nginx |
+
+## Why owned code instead of low-code
+
+| Advantage | What it means here |
+| --- | --- |
+| **Low cost** | No per-user or premium-connector licences: the stack is open source (React, FastAPI, PostgreSQL). The AWS deployment defaults to small, autoscaled resources — a `db.t4g.micro` Postgres and 0.5 vCPU / 1 GB Fargate tasks scaling between `api_min_count` (2) and `api_max_count` (8) — all Terraform variables. Locally it runs on any Postgres with `docker compose up` or `./setup.sh`. |
+| **Low maintenance** | Every change goes through CI (ruff, pytest, a Postgres smoke test, oxlint, `tsc`, Docker builds, `terraform validate`) and the `dev` → `main` promotion flow; deploys are automated with ECS auto-rollback. The [self-healing loop](#self-healing-loop-devin) turns production errors, guardrail alerts and failing compliance controls into Devin sessions that open fix PRs, and the [Compliance Center](#compliance-center) checks controls continuously instead of in an annual audit scramble. |
+| **High iteration speed** | Support tickets (`POST /support/requests`), production errors and failing compliance controls are queued and handed to Devin, which reproduces the issue with a test, fixes it and opens a PR against `dev`. Merging to `dev` deploys the dev environment, so a request can go from idea to running software in one review cycle. |
+| **High flexibility** | Plain code has no delegation limits, formula language or connector ceilings: policy logic lives in [`backend/app/policy.py`](backend/app/policy.py), data in a normal Postgres schema with BI views, and infrastructure in Terraform. Swap the identity provider, payment provider or database host with configuration rather than a platform migration. |
+| **Easy third-party connections** | An integration is an authenticated HTTP client plus config: the customer-history API ([`history_client.py`](backend/app/history_client.py), `HISTORY_PROVIDER_URL`/`HISTORY_PROVIDER_API_KEY`), the PayCore payments API with signed webhooks ([`payments_client.py`](backend/app/payments_client.py)), the Devin API ([`remediation.py`](backend/app/remediation.py)) and OIDC SSO. Secrets come from Secrets Manager on AWS; the BI views and CSV export plug into any reporting tool. |
 
 ## What it does
 
@@ -34,10 +46,61 @@ screens, approvals, connectors and analytics.
 - *Team & limits*: add users, change roles, per-refund and daily approval limits, deactivate.
 - *Policies*: org hard cap, high-risk threshold, customer 30-day cap, min note length, SLA hours.
 - *Audit log*: filterable, including denied attempts. *View as*: read-only preview of exactly what another user sees.
+- *Compliance*: live control checks with evidence, evidence-pack download, quarterly access review, GDPR
+  data-subject requests and "Fix with Devin" on failing controls (see [Compliance Center](#compliance-center)).
 
 **Viewer** (`vik.auditor`) — read-only analytics and refunds list, customer PII masked, no actions, no history calls.
+Also the auditor role for the *Compliance* page: can read every control's evidence and download the evidence pack, but change nothing.
 
-## Controls (enforced server-side in [`backend/app/policy.py`](backend/app/policy.py))
+## Payouts through a payments provider
+
+Approving a refund now actually returns the money through the payments provider (PayCore, a mock with the same shape
+as Stripe/Adyen refunds). Admins get a **Payouts** page; everyone sees a payout badge on approved refunds and a live
+payout section in the refund drawer. The code is in [`backend/app/payouts.py`](backend/app/payouts.py) (state machine),
+[`backend/app/payments_client.py`](backend/app/payments_client.py) (provider client) and
+[`backend/app/routers/payouts.py`](backend/app/routers/payouts.py) (admin API + webhook receiver).
+
+```
+approve ──(same DB transaction)──> queued ──worker──> processing ──signed webhook / reconcile──> succeeded | failed
+                                    │  ▲                  └── 4xx decline ──> failed (admin can re-drive)
+                         5xx/timeout│  │ exponential backoff + jitter, same Idempotency-Key
+                                    ▼  │
+                              retry_scheduled ──(PAYOUT_MAX_ATTEMPTS)──> failed (retries_exhausted)
+```
+
+- **Exactly-once money movement**: the payout row is written in the approval's transaction (outbox), and every attempt
+  for that payout sends one `Idempotency-Key`. A retry after a timeout where the provider *did* refund comes back as a
+  replay, not a second refund.
+- **Transient vs definitive errors**: 5xx / 429 / timeouts are retried by a background worker with backoff; a 402
+  decline fails immediately. Re-driving a declined payout uses a new key; re-driving `retries_exhausted` keeps the old
+  key, because the provider may already have processed it.
+- **Webhooks**: `POST /webhooks/paycore` checks `PayCore-Signature` (HMAC-SHA256 over `timestamp.body`, constant-time
+  compare, 5-minute window so old webhooks can't be replayed), skips redeliveries by event id, and never moves a payout
+  out of a final state when events arrive out of order. Rejected webhooks are written to the audit log.
+- **Reconciliation**: *Reconcile with PayCore* asks the provider for the status of every payout still in flight and
+  fixes any mismatch (for example, a lost webhook).
+- **Sandbox**: the Payouts page can make the provider fail on purpose (`outage`, `lost_response`, `decline`,
+  `async_fail`, `drop_webhook`) so you can show each case live. Turn it off with `PAYMENTS_SANDBOX_CONTROLS=false` (off by default when `ENVIRONMENT=prod`).
+- Every step is a refund timeline event and an audit row on the approval's trace id. `pytest` covers each case against
+  a fake provider running inside the test process.
+
+Config: `PAYMENTS_PROVIDER_URL`, `PAYMENTS_PROVIDER_API_KEY`, `PAYMENTS_WEBHOOK_SECRET` (shared with the provider;
+from Secrets Manager on AWS), `PAYOUT_MAX_ATTEMPTS`, `PAYOUT_RETRY_BASE_S`, `PAYOUT_RETRY_MAX_S`,
+`PAYOUT_WORKER_ENABLED`. Provider side: `PAYMENTS_WEBHOOK_URL`, `PAYMENTS_WEBHOOK_SECRET`, `PAYMENTS_SETTLE_DELAY_S`.
+To use a real PSP, swap the three functions in `payments_client.py` and the signature format in `verify_signature`.
+
+### Why this is hard to do well in Power Apps
+
+| Need | Power Apps / Power Automate | Here |
+| --- | --- | --- |
+| Call the PSP's refund API | Custom connector + premium licensing for every user who runs it | `httpx` call, ~60 lines |
+| Idempotency key that is kept across retries *and* manual re-drives | Has to be built by hand in the flow and stored in Dataverse; the connector's built-in retry policy doesn't distinguish a decline from an outage | `payouts.attempt` / `manual_retry`, unit-tested |
+| Approval and payout intent committed atomically | A canvas app `Patch` plus a flow run are separate operations; no shared transaction | One DB transaction (outbox row) |
+| Receive signed webhooks | "When an HTTP request is received" trigger (premium); flow expressions have no HMAC function, so signature checks usually need an Azure Function | HMAC + timestamp check in `verify_signature` |
+| Out-of-order / duplicate events, reconciliation | Concurrency control and dedup tables built by hand; delegation limits when querying large tables from the app | Row locks, unique event ids, terminal-state guard, `reconcile()` |
+| Test it | Manual testing in the maker portal | `pytest` simulates outages, lost responses, declines, forged and replayed webhooks |
+
+ in [`backend/app/policy.py`](backend/app/policy.py))
 
 - **Visibility**: reviewers only see refunds assigned to / escalated by / decided by them; others return `404` (no probing).
 - **Approval limits**: per-refund and per-UTC-day limits per user; org-wide hard cap applies to admins too.
@@ -49,7 +112,9 @@ screens, approvals, connectors and analytics.
 - **Admin safety**: admins can't demote/deactivate themselves; viewers can't be assignees.
 - **PII**: viewer responses mask customer name/email.
 - **Audit**: every decision, denial, assignment, history lookup, policy/user change and login is written to
-  `audit_log`, which a Postgres trigger makes append-only.
+  `audit_log`, which a Postgres trigger makes append-only. Each row is also SHA-256 hash-chained to the previous
+  one (`prev_hash` / `row_hash`, see [`backend/app/audit.py`](backend/app/audit.py)), so an edit or deletion made
+  by someone who bypasses the trigger is still detected.
 - The API also returns computed per-refund `permissions` so the UI can explain *why* a button is disabled.
 
 ## Architecture
@@ -64,7 +129,8 @@ backend/mock_provider/  stand-in third-party customer-history API      :9000
 
 Tables: `users`, `customers`, `refund_requests` (status, reason, risk, amounts, SLA, assignee/escalator/decider),
 `refund_events` (lifecycle timeline), `audit_log` (append-only), `policy_settings`, `request_traces` (per-request
-traceability), and `support_requests` (support/error tickets for remediation). Postgres BI views
+traceability), `support_requests` (support/error/guardrail/compliance tickets for remediation), `access_reviews`
+(completed user-access recertifications) and `data_subject_requests` (GDPR export/erasure requests). Postgres BI views
 (`v_refund_facts`, `v_reviewer_daily`, `v_denied_actions`) and the audit-log immutability trigger live in
 [`backend/app/sql/analytics.sql`](backend/app/sql/analytics.sql); the SQLAlchemy models are in
 [`backend/app/models.py`](backend/app/models.py).
@@ -83,8 +149,8 @@ API docs: http://localhost:8000/docs.
 Reset demo data with `docker compose down -v`.
 
 `ENVIRONMENT` defaults to `dev` everywhere (local dev, Compose, tests). Set `ENVIRONMENT=prod` for a hardened
-deployment: the mock IdP endpoints are not mounted, demo seeding is disabled unless `SEED_ON_STARTUP=true`, and a
-missing `JWT_SECRET` fails startup. The SPA learns the mode from the public `GET /api/auth/config` endpoint.
+deployment: the mock IdP endpoints are not mounted, demo seeding is disabled unless `SEED_ON_STARTUP=true`, the payouts
+sandbox failure controls are off unless `PAYMENTS_SANDBOX_CONTROLS=true`, and a missing `JWT_SECRET` or `PAYMENTS_WEBHOOK_SECRET` fails startup. The SPA learns the mode from the public `GET /api/auth/config` endpoint.
 
 ### Option B — local dev
 
@@ -105,13 +171,13 @@ npm run dev                                       # http://localhost:5173
 ```
 
 Config is via env vars (see [`backend/app/config.py`](backend/app/config.py) and [`.env.example`](.env.example)):
-`ENVIRONMENT`, `DATABASE_URL`, `JWT_SECRET` (required in prod), `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP` (off by default in prod), `MOCK_MFA_CODE` (dev SSO second factor), `GUARDRAIL_ALERT_THRESHOLD` / `GUARDRAIL_ALERT_WINDOW_MINUTES` (auto-ticket on denied-action spikes).
+`ENVIRONMENT`, `DATABASE_URL`, `JWT_SECRET` (required in prod), `PAYMENTS_WEBHOOK_SECRET` (required in prod; see Payouts), `HISTORY_PROVIDER_URL`, `HISTORY_PROVIDER_API_KEY`, `ALLOWED_REDIRECT_ORIGINS`, `SEED_ON_STARTUP` (off by default in prod), `MOCK_MFA_CODE` (dev SSO second factor), `GUARDRAIL_ALERT_THRESHOLD` / `GUARDRAIL_ALERT_WINDOW_MINUTES` (auto-ticket on denied-action spikes), and the Compliance Center thresholds `SESSION_IDLE_LIMIT_MINUTES` (15), `AUDIT_RETENTION_DAYS` (400), `ACCESS_REVIEW_INTERVAL_DAYS` (90), `DORMANT_ACCOUNT_DAYS` (90), `DSAR_DUE_DAYS` (30).
 Frontend: `VITE_API_URL` (defaults to `/api`).
 
 ### Tests
 
 ```bash
-cd backend && pytest -q        # RBAC, limits, escalation, four-eyes, PII masking, audit, SSO + MFA
+cd backend && pytest -q        # RBAC, limits, escalation, four-eyes, PII masking, audit, SSO + MFA, compliance controls
 cd frontend && npm run build   # type-check + production build
 cd frontend && npm run test:e2e # Playwright end-to-end (see below)
 ```
@@ -135,10 +201,14 @@ npm run test:e2e                  # E2E_BASE_URL overrides the default http://lo
 | sam.patel@acmepay.com | reviewer | $1,000 | $10,000 |
 | jordan.lee@acmepay.com | reviewer | $500 | $5,000 |
 | vik.auditor@acmepay.com | viewer | — | — |
+| dana.brooks@contractor.acmepay.com | viewer | — | — |
+
+`dana.brooks` is a seeded compliance finding: a contractor who has not signed in for 137 days and was never
+offboarded. The seed also adds an overdue GDPR erasure request for `cus_1007`.
 
 ## Production notes
 
-- Run with `ENVIRONMENT=prod` (the AWS Terraform deployment does): this unmounts the mock SSO IdP, disables demo seeding and requires a strong `JWT_SECRET`. Then replace the mock SSO with a real OIDC provider — the frontend already uses the redirect + code-exchange flow.
+- Run with `ENVIRONMENT=prod` (the AWS Terraform deployment does): this unmounts the mock SSO IdP, disables demo seeding and requires a strong `JWT_SECRET` and `PAYMENTS_WEBHOOK_SECRET`. Then replace the mock SSO with a real OIDC provider — the frontend already uses the redirect + code-exchange flow.
 - Replace `mock_provider` with the real vendor URL/key via `HISTORY_PROVIDER_URL` / `HISTORY_PROVIDER_API_KEY` (store as secrets).
 - Use Alembic migrations instead of `create_all` once the schema stabilises.
 - The same pattern (policy module + audit log + role-aware React screens) is a template for the KYC review queue and feature-flag admin panel.
@@ -171,16 +241,87 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/admin/traces/tr_…       
 curl -H "Authorization: Bearer $TOKEN" "localhost:8000/admin/traces?errors_only=true"
 ```
 
+## Compliance Center
+
+An owned app does not inherit a vendor's certifications the way a Power Apps tenant inherits Microsoft's. The
+equivalent here is three layers: AWS attestations for the infrastructure, Cognition's own SOC 2 Type II report for
+the Devin platform used to build and operate the app, and **application controls implemented in this repo, checked
+continuously and evidenced on demand**. The last layer is the Compliance Center (admin and viewer/auditor nav →
+*Compliance*), defined in [`backend/app/compliance.py`](backend/app/compliance.py) and served by
+[`backend/app/routers/compliance.py`](backend/app/routers/compliance.py).
+
+- **Control catalog**: 18 controls, each mapped to SOC 2, PCI DSS 4.0, SOX ITGC and/or GDPR references. Automated
+  controls run live against the database and config on every request (`GET /compliance/controls`) and return
+  `pass` / `warn` / `fail` with the evidence they looked at. Examples: segregation of duties (no self-decided
+  refunds), delegated limits within the hard cap, admin sign-off on high-risk approvals, quarterly access review,
+  dormant accounts (90 days), MFA, 15-minute session idle timeout (PCI DSS 8.2.8), security-event logging (successful sign-in,
+  refund-decision and PII-access events must all be present), audit
+  hash chain + append-only trigger, 12-month log retention, live PII-masking probe, GDPR request deadlines, and
+  encryption in transit, and continuous monitoring (MN-01 warns while any failing control has no open ticket).
+  High-risk sign-off is judged by the approver's role recorded on the approval event, not their current role.
+  Infra/process controls (change management, WAF, backups) are `documented` and link to
+  the files that implement them.
+- **Evidence pack** (`GET /compliance/evidence-pack`): JSON snapshot of every control result, the audit-chain
+  verification (including the chain `head_hash`), recent access reviews, data-subject requests (without their
+  free-text notes, since viewers can download the pack) and the relevant config. The SHA-256 of the file is
+  returned in `X-Evidence-SHA256` and written to the audit log, so the exported file can be matched to the export later.
+- **Tamper-evident audit log** (`GET /compliance/audit-chain`): recomputes the hash chain and reports the first
+  broken entry. Rows written before the chain existed are counted as legacy, not verified.
+- **Access review** (`/compliance/access-review`, admin): certify or revoke every active user in one signed-off
+  review. Revoking deactivates the account. The review and each revocation are audited, and admins cannot revoke themselves.
+- **Data-subject requests** (`/compliance/dsr`, admin): log GDPR access/erasure requests with a 30-day due date.
+  Export returns the subject's data; calling fulfil again on a completed export re-delivers it (audited as
+  `compliance.dsr_export_redeliver`). Erasure pseudonymises the customer's name and email, redacts them from refund
+  descriptions, and keeps the refund records,
+  which must be retained for financial record-keeping (GDPR Art. 17(3)(b)).
+- **Fix with Devin** (`POST /compliance/controls/{id}/remediate`, admin): opens a `compliance` ticket that contains the
+  control, its framework references, the failing evidence and the expected remediation (deduped while open). With
+  the Devin API configured, the ticket goes through the [self-healing loop](#self-healing-loop-devin), and Devin is
+  told to fix the root cause with a regression test and never to weaken the check.
+
+Out of the box (seeded demo data) four controls fail: no access review on record (AC-05), the dormant contractor
+(AC-06) and the overdue erasure request (DP-02) can all be fixed in the UI. The 8-hour session vs the 15-minute
+idle limit (IA-02) is a code change, so it is the one to hand to Devin.
+
 ## Self-healing loop (Devin)
 
-- Any user can file `POST /support/requests {title, description, trace_id}`.
+- **Feature requests & problem reports**: the **Request a feature** button in the top bar (all roles) opens a
+  modal — pick *Feature request* or *Report a problem*, add a title/details, submit. With `DEVIN_API_KEY` +
+  `DEVIN_ORG_ID` configured (`AUTO_REMEDIATE_REQUESTS`, default on) the ticket is queued and a Devin session
+  starts immediately: it investigates and opens a PR against `dev` when the request is actionable. Without the
+  key the ticket is still recorded (`status: open`) for manual triage. Admins watch progress on the
+  **Support tickets** page (status, Devin session link, re-send failed tickets to Devin).
+- Any user can also file `POST /support/requests {kind: "feature"|"support", title, description, trace_id}`.
 - Every unhandled exception automatically opens an `error` ticket (deduped by exception fingerprint for `REMEDIATION_COOLDOWN_MINUTES`).
-- With `DEVIN_API_KEY` + `DEVIN_ORG_ID` set, error tickets (and support tickets via `POST /admin/support/requests/{id}/remediate`) start a Devin session through the Devin API (`POST /v3/organizations/{org}/sessions`). The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `dev` (`DEVIN_BASE_BRANCH`). The session URL is stored on the ticket (`GET /admin/support/requests`).
+- With `DEVIN_API_KEY` set (a legacy `apk_` key uses `POST /v1/sessions`; an org key also needs `DEVIN_ORG_ID` and uses `POST /v3/organizations/{org}/sessions`), error tickets start a Devin session automatically (`AUTO_REMEDIATE_ERRORS`). UI feature/problem requests are queued automatically (`AUTO_REMEDIATE_REQUESTS`); any other ticket is sent with `POST /admin/support/requests/{id}/remediate` or the **Send to Devin** button. The prompt contains the full trace bundle and instructs Devin to reproduce with a failing test, fix, keep CI green, and open a PR against `DEVIN_BASE_BRANCH` (default `dev`). Each session is capped at `DEVIN_MAX_ACU` (default 10).
+- Admins see every ticket, its status and Devin session link on the **Support tickets** page (`GET /admin/support/requests`, `GET /admin/support/config`).
 - Without the key, tickets are still recorded; nothing is sent anywhere.
+- Hand-off is durable: tickets are queued in Postgres (`status=queued`) and a worker in each API process sends them (`SELECT … FOR UPDATE SKIP LOCKED`), so a ticket survives restarts/deploys and is sent once even with several API tasks. Tune with `REMEDIATION_POLL_SECONDS` / `REMEDIATION_WORKER_ENABLED`.
+- **Compliance findings**: "Fix with Devin" on a failing Compliance Center control opens a `compliance` ticket through the same loop (see [Compliance Center](#compliance-center)).
 - **Guardrail alerts**: every policy/RBAC denial is audited; a spike of `GUARDRAIL_ALERT_THRESHOLD` (default 50)
   denied actions within `GUARDRAIL_ALERT_WINDOW_MINUTES` (default 10) auto-opens a `guardrail` support ticket —
   deduped while one is open — which goes through the same Devin remediation loop, so a misfiring policy or an
   attack probe results in a investigated PR rather than a silent log line. Set the threshold to `0` to disable.
+
+### Demo (`scripts/demo.sh`)
+
+A repeatable demo on a throwaway `demo` branch, so `dev` and `main` are never touched:
+
+```bash
+scripts/demo.sh reset     # rebuild `demo` from dev (DEMO_BASE) + a planted bug (ZeroDivisionError in per-reviewer approval rate), close stale demo PRs
+scripts/demo.sh up        # isolated stack (compose project refunds-demo, fresh DB) with DEVIN_BASE_BRANCH=demo
+scripts/demo.sh trigger   # optional: does steps 2-3 below from the CLI
+scripts/demo.sh status    # tickets + Devin session links
+scripts/demo.sh down
+```
+
+1. Open http://localhost:8080 and sign in as `priya.admin@acmepay.com` (MFA code `MOCK_MFA_CODE`, default `123456`).
+2. **Team & limits**: add a reviewer (they have no decisions yet).
+3. **Analytics**: the page fails with a 500; the error shows the trace id.
+4. **Support tickets**: an `error` ticket for the `ZeroDivisionError` is `devin_working`, with a link to the Devin session.
+5. Follow the session to a PR into `demo` with a failing test, the fix and green CI. Run `reset` again to repeat.
+
+To rehearse without spending ACUs, point the backend at a stub: `DEVIN_API_KEY=apk_fake DEVIN_API_URL=http://172.17.0.1:9999 scripts/demo.sh up`.
 
 ## Secrets (`scripts/secrets.sh`)
 
@@ -261,4 +402,4 @@ Every infra setting is a Terraform variable — change it in a PR (see [`infra/t
 
 Then merge to `main` (or run the Deploy workflow); the app URL is the `app_url` Terraform output.
 
-Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data), prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only), and the single-use SSO code store is per-process.
+Not yet production-grade: tables are created with `create_all` (use Alembic migrations before real data) and prod still needs a real OIDC provider wired into `/auth/token` (the mock IdP is dev-only). Redeemed SSO codes are tracked in Postgres (`used_sso_codes`), so single-use holds across API tasks.

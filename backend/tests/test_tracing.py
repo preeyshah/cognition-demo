@@ -21,7 +21,8 @@ def test_every_request_gets_a_trace_id_linked_to_audit_and_events(client, db):
     admin = user(db, "priya.admin@acmepay.com")
     bundle = client.get(f"/admin/traces/{trace_id}", headers=auth(admin)).json()
     assert bundle["request"]["path"] == f"/refunds/{r.id}/approve"
-    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved"]
+    # The first payout attempt runs after the response but stays on the approval's trace.
+    assert [e["event_type"] for e in bundle["refund_events"]] == ["approved", "payout_queued", "payout_submitted"]
     # Traces are admin-only.
     assert client.get(f"/admin/traces/{trace_id}", headers=auth(j)).status_code == 403
 
@@ -37,7 +38,8 @@ def test_trace_ids_are_server_generated_and_unique(client, db):
 def test_unhandled_error_returns_trace_and_opens_ticket_for_devin(client, db, monkeypatch):
     started = []
     monkeypatch.setattr(remediation, "enabled", lambda: True)
-    monkeypatch.setattr(remediation, "remediate_async", lambda sr_id: started.append(sr_id))
+    monkeypatch.setattr(remediation, "start_devin_session", lambda prompt, title: started.append(title) or
+                        {"session_id": "devin-err", "url": "https://app.devin.ai/sessions/err"})
 
     @app.get("/__boom")
     def boom():
@@ -52,8 +54,14 @@ def test_unhandled_error_returns_trace_and_opens_ticket_for_devin(client, db, mo
     db.expire_all()
     tickets = db.query(SupportRequest).filter_by(kind="error").all()
     assert len(tickets) == 1 and tickets[0].trace_id == res.headers["X-Trace-Id"]  # repeat is deduped
-    assert started == [tickets[0].id]
+    assert tickets[0].status == "queued" and started == []  # durable: nothing sent from the request itself
     assert res2.status_code == 500
+
+    assert remediation.process_queue() == 1
+    assert remediation.process_queue() == 0
+    db.expire_all()
+    assert started == [f"[refunds-console] {tickets[0].title}"]
+    assert db.get(SupportRequest, tickets[0].id).status == "devin_working"
 
 
 def test_error_ticket_failure_still_returns_traced_500(client, monkeypatch):
@@ -100,3 +108,59 @@ def test_support_request_flow(client, db, monkeypatch):
     sr = db.get(SupportRequest, sr_id)
     assert sr.status == "devin_working" and sr.devin_session_url.endswith("/abc")
     assert "open a PR" in sent["prompt"] and "Approve button greyed out" in sent["prompt"]
+
+
+def test_support_request_kinds(client, db):
+    j = user(db, JORDAN)
+    res = client.post("/support/requests", headers=auth(j),
+                      json={"kind": "feature", "title": "Bulk approve refunds under $50"})
+    assert res.status_code == 201
+    assert res.json()["kind"] == "feature" and res.json()["status"] == "open"  # Devin not configured in tests
+    assert client.post("/support/requests", headers=auth(j),
+                       json={"kind": "bogus", "title": "not a real kind"}).status_code == 422
+
+    sr = db.get(SupportRequest, res.json()["id"])
+    prompt = remediation.build_prompt(sr, None)
+    assert "feature request" in prompt and "implement the requested change" in prompt
+
+
+def test_admin_remediate_queues_ticket_for_worker(client, db, monkeypatch):
+    admin = user(db, "priya.admin@acmepay.com")
+    sr_id = client.post("/support/requests", headers=auth(admin), json={"title": "Export is empty"}).json()["id"]
+    monkeypatch.setattr(remediation, "enabled", lambda: True)
+    res = client.post(f"/admin/support/requests/{sr_id}/remediate", headers=auth(admin))
+    assert res.status_code == 200 and res.json()["status"] == "queued"
+
+    monkeypatch.setattr(remediation, "start_devin_session", lambda prompt, title: (_ for _ in ()).throw(RuntimeError("503")))
+    assert remediation.process_queue() == 1
+    db.expire_all()
+    sr = db.get(SupportRequest, sr_id)
+    assert sr.status == "remediation_failed" and "503" in sr.remediation_error
+
+
+def test_guardrail_alert_is_queued_for_the_worker(client, db, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "guardrail_alert_threshold", 1)
+    viewer = user(db, "vik.auditor@acmepay.com")
+    r = make_refund(db, user(db, JORDAN))
+    assert client.post(f"/refunds/{r.id}/approve", headers=auth(viewer), json={}).status_code == 403
+    db.expire_all()
+    sr = db.query(SupportRequest).filter_by(kind="guardrail").one()
+    assert sr.status == "queued"
+
+    monkeypatch.setattr(remediation, "enabled", lambda: True)
+    monkeypatch.setattr(remediation, "start_devin_session", lambda prompt, title: {"session_id": "devin-g"})
+    assert remediation.process_queue() == 1
+    db.expire_all()
+    assert db.get(SupportRequest, sr.id).status == "devin_working"
+
+
+def test_support_config_is_admin_only_and_has_no_secrets(client, db):
+    admin = user(db, "priya.admin@acmepay.com")
+    res = client.get("/admin/support/config", headers=auth(admin))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["devin_enabled"] is False and body["base_branch"] == "dev"
+    assert not any("key" in k for k in body)
+    assert client.get("/admin/support/config", headers=auth(user(db, JORDAN))).status_code == 403

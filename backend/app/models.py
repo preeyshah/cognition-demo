@@ -114,6 +114,7 @@ class RefundRequest(Base):
     assigned_to: Mapped[User | None] = relationship(foreign_keys=[assigned_to_id], lazy="joined")
     decided_by: Mapped[User | None] = relationship(foreign_keys=[decided_by_id], lazy="joined")
     escalated_by: Mapped[User | None] = relationship(foreign_keys=[escalated_by_id], lazy="joined")
+    payout: Mapped["Payout | None"] = relationship(back_populates="refund", lazy="selectin", uselist=False)
 
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="ck_refund_amount_positive"),
@@ -157,6 +158,9 @@ class AuditLog(Base):
     detail: Mapped[dict] = mapped_column(JsonType, default=dict)
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True, default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    # SHA-256 hash chain (see audit.chain_hash): editing or deleting any row breaks every later link.
+    prev_hash: Mapped[str | None] = mapped_column(String(64))
+    row_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class PolicySetting(Base):
@@ -196,7 +200,7 @@ class SupportRequest(Base):
     __tablename__ = "support_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "error" | "guardrail"
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # "support" | "feature" | "error" | "guardrail" | "compliance"
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
@@ -208,3 +212,107 @@ class SupportRequest(Base):
     remediation_error: Mapped[str | None] = mapped_column(Text)
     created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class AccessReview(Base):
+    """A completed user-access recertification (SOC 2 CC6.2/CC6.3, PCI DSS 7.2.4, SOX ITGC)."""
+
+    __tablename__ = "access_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewer_email: Mapped[str] = mapped_column(String(255))
+    decisions: Mapped[list] = mapped_column(JsonType, default=list)
+    revoked_count: Mapped[int] = mapped_column(Integer, default=0)
+    trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class DataSubjectRequest(Base):
+    """GDPR data-subject request (Art. 15 access / Art. 17 erasure), due within dsar_due_days."""
+
+    __tablename__ = "data_subject_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # "export" | "erasure"
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # "open" | "completed"
+    note: Mapped[str] = mapped_column(Text, default="")
+    requested_by_email: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    result: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+    customer: Mapped[Customer] = relationship(lazy="joined")
+
+
+class UsedSsoCode(Base):
+    """Redeemed one-time SSO codes (by jti), shared by every API process so a code works exactly once."""
+
+    __tablename__ = "used_sso_codes"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PayoutStatus(str, enum.Enum):
+    queued = "queued"  # approved; waiting for the worker to call the provider
+    retry_scheduled = "retry_scheduled"  # transient provider error; retried with backoff
+    processing = "processing"  # accepted by the provider, waiting for the settlement webhook
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class Payout(Base):
+    """The money movement for an approved refund at the payments provider (one per refund).
+
+    Written in the same transaction as the approval (transactional outbox), then driven by the
+    payout worker, provider webhooks and reconciliation."""
+
+    __tablename__ = "payouts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    refund_id: Mapped[int] = mapped_column(ForeignKey("refund_requests.id"), unique=True)
+    provider: Mapped[str] = mapped_column(String(32), default="paycore")
+    idempotency_key: Mapped[str] = mapped_column(String(80), unique=True)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[PayoutStatus] = mapped_column(
+        Enum(PayoutStatus, name="payout_status"), default=PayoutStatus.queued, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    manual_retries: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    refund: Mapped[RefundRequest] = relationship(back_populates="payout", lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="ck_payout_amount_positive"),
+        CheckConstraint("attempts >= 0", name="ck_payout_attempts_nonneg"),
+    )
+
+
+class ProviderWebhookEvent(Base):
+    """Every signature-verified provider webhook, keyed by event id so redeliveries are no-ops."""
+
+    __tablename__ = "provider_webhook_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), default="paycore")
+    event_id: Mapped[str] = mapped_column(String(64), unique=True)
+    event_type: Mapped[str] = mapped_column(String(64))
+    provider_refund_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    outcome: Mapped[str] = mapped_column(String(32))  # applied | ignored_stale | unknown_refund
+    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), default=current_trace_id)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
