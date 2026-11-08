@@ -102,6 +102,17 @@ resource "aws_security_group" "provider" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  dynamic "egress" {
+    for_each = var.allow_public_alb ? [1] : []
+    content {
+      description = "HTTP webhook callbacks to the public ALB (dev only)"
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
 }
 
 resource "aws_security_group" "db" {
