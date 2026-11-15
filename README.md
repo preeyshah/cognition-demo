@@ -235,7 +235,7 @@ offboarded. The seed also adds an overdue GDPR erasure request for `cus_1007`.
 
 The app only needs a `DATABASE_URL` (or `DB_HOST`/`DB_USER`/`DB_PASSWORD`). It creates the schema, BI views and audit trigger, and seeds demo data on first start.
 
-On AWS, RDS rotates the managed master password in Secrets Manager while ECS only injects `DB_PASSWORD` at task start. `DB_SECRET_ARN` (set by Terraform) makes [`db.py`](backend/app/db.py) re-read the secret when Postgres rejects the password and retry the connection once, so running tasks survive a rotation; the ECS task role can read only that secret.
+On AWS, RDS rotates the managed master password in Secrets Manager while ECS only injects `DB_PASSWORD` at task start. `DB_SECRET_ARN` (set by Terraform) makes [`db.py`](backend/app/db.py) re-read the secret when Postgres rejects the password and retry the connection once, so running tasks survive a rotation. Only the api task role can read that secret (the provider task has no AWS access); `DB_SECRET_ARN` is ignored when an explicit `DATABASE_URL` is set.
 
 ## Monitoring & tracing
 

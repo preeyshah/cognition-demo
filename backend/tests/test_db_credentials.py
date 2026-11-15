@@ -11,7 +11,8 @@ import types
 import psycopg
 import pytest
 
-from app.db import DbCredentials, make_engine, secrets_manager_fetcher
+from app.config import Settings
+from app.db import DbCredentials, credentials_from_settings, make_engine, secrets_manager_fetcher
 
 URL = "postgresql+psycopg://refunds_app:old-pw@10.40.21.215:5432/refunds?sslmode=require"
 AUTH_ERROR = (
@@ -111,3 +112,19 @@ def test_secrets_manager_fetcher_reads_rds_secret(monkeypatch):
     arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-abc-123"
     assert secrets_manager_fetcher(arn)() == ("refunds_app", "new-pw")
     assert calls == {"secret": arn, "service": "secretsmanager", "region": "us-east-1"}
+
+
+ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-abc-123"
+
+
+def test_secret_arn_applies_to_url_built_from_parts(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    s = Settings(db_host="db", db_user="refunds_app", db_password="old-pw", db_secret_arn=ARN, _env_file=None)
+    assert credentials_from_settings(s).get() == ("refunds_app", "old-pw")
+
+
+def test_secret_arn_ignored_for_explicit_database_url():
+    s = Settings(
+        database_url="postgresql+psycopg://other:pw@host/db", db_host="db", db_secret_arn=ARN, _env_file=None
+    )
+    assert credentials_from_settings(s) is None

@@ -88,7 +88,7 @@ def make_engine(url: str, credentials: DbCredentials | None = None):
 
 
 def credentials_from_settings(settings: Settings) -> DbCredentials | None:
-    if not settings.db_secret_arn:
+    if not settings.db_secret_arn or not settings.db_url_from_parts:
         return None
     return DbCredentials(
         secrets_manager_fetcher(settings.db_secret_arn), settings.db_user, settings.db_password
