@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     db_user: str = ""
     db_password: str = ""
     db_sslmode: str = "require"
+    # ARN of the RDS-managed master user secret. When set, the app re-reads the password from
+    # Secrets Manager if Postgres rejects it (the secret rotates; DB_PASSWORD is fixed at task start).
+    db_secret_arn: str = ""
 
     # Self-healing: hand errors / support requests to Devin, which opens a PR on this repo.
     devin_api_url: str = "https://api.devin.ai"

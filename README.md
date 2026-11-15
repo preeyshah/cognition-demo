@@ -235,6 +235,8 @@ offboarded. The seed also adds an overdue GDPR erasure request for `cus_1007`.
 
 The app only needs a `DATABASE_URL` (or `DB_HOST`/`DB_USER`/`DB_PASSWORD`). It creates the schema, BI views and audit trigger, and seeds demo data on first start.
 
+On AWS, RDS rotates the managed master password in Secrets Manager while ECS only injects `DB_PASSWORD` at task start. `DB_SECRET_ARN` (set by Terraform) makes [`db.py`](backend/app/db.py) re-read the secret when Postgres rejects the password and retry the connection once, so running tasks survive a rotation; the ECS task role can read only that secret.
+
 ## Monitoring & tracing
 
 Every API request gets a unique, server-generated trace id (`tr_<uuid>`; a client-sent `X-Trace-Id` / `X-Request-ID` is only kept as `client_ref` so callers cannot merge traces). It is:
@@ -403,7 +405,7 @@ Browser ──HTTPS──> CloudFront (+ AWS WAF on prod: IP reputation, OWASP c
                                       ├── RDS Postgres 16 (DB subnets, no public IP, KMS, force SSL,
                                       │   storage autoscaling, backups + DR copy, deletion protection)
                                       └── ECS "provider" (mock PayCore, reachable only from api via Cloud Map)
-Secrets Manager (KMS): RDS-managed DB password, JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
+Secrets Manager (KMS): RDS-managed DB password (rotated; re-read by the app via `DB_SECRET_ARN`), JWT secret, provider key, Devin API key. VPC flow logs, CloudWatch alarms -> SNS.
 ```
 
 Same-origin SPA + API means the browser never makes cross-origin calls; CORS and the SSO redirect allow-list are pinned to allowed origins. Both are module variables (`allowed_redirect_origins`, `cors_origins`) supporting `*` wildcards — envs currently allow `https://*.cloudfront.net` plus `localhost:8080`/`localhost:5173` for local frontend dev. `TRUSTED_PROXY_HOPS=2` makes audit IPs come from the CloudFront/ALB-appended `X-Forwarded-For` entry, not client-supplied values.
