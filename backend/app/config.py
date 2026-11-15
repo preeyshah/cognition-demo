@@ -3,7 +3,7 @@ import secrets
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import field_validator, model_validator
+from pydantic import PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEMO_WEBHOOK_SECRET = "whsec_demo_only"
@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     db_user: str = ""
     db_password: str = ""
     db_sslmode: str = "require"
+    # ARN of the RDS-managed master user secret. When set, the app re-reads the password from
+    # Secrets Manager if Postgres rejects it (the secret rotates; DB_PASSWORD is fixed at task start).
+    db_secret_arn: str = ""
+    _db_url_from_parts: bool = PrivateAttr(default=False)
 
     # Self-healing: hand errors / support requests to Devin, which opens a PR on this repo.
     devin_api_url: str = "https://api.devin.ai"
@@ -135,6 +139,7 @@ class Settings(BaseSettings):
                 f"postgresql+psycopg://{quote(self.db_user, safe='')}:{quote(self.db_password, safe='')}"
                 f"@{self.db_host}:{self.db_port}/{self.db_name}?sslmode={self.db_sslmode}"
             )
+            self._db_url_from_parts = True
         return self
 
     @field_validator("jwt_secret")
@@ -142,6 +147,10 @@ class Settings(BaseSettings):
     def _random_secret_if_blank(cls, v: str) -> str:
         # Blank means "not configured": use an ephemeral random key rather than a known default.
         return v or secrets.token_urlsafe(48)
+
+    @property
+    def db_url_from_parts(self) -> bool:
+        return self._db_url_from_parts
 
     @property
     def redirect_origins(self) -> list[str]:
