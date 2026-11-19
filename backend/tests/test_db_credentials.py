@@ -87,3 +87,28 @@ def test_no_secret_arn_keeps_static_password(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert password_source(Settings(db_host="db.internal", db_user="u", db_password="p", _env_file=None)) is None
     assert password_source(Settings(database_url="sqlite://", db_secret_arn=SECRET_ARN, _env_file=None)) is None
+
+
+def test_secrets_manager_outage_does_not_block_next_refresh():
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("Secrets Manager unavailable")
+        return "rotated"
+
+    creds = RotatingPassword("stale", fetch=fetch, clock=lambda: 0.0)
+    dialect = FakeDialect(server_password="rotated")
+    with pytest.raises(psycopg.OperationalError, match="password authentication failed"):
+        _connect(creds, dialect)
+    assert _connect(creds, dialect) is not None  # retried right away once the secret is readable
+    assert len(calls) == 2
+
+
+def test_explicit_database_url_password_is_the_starting_password(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_PASSWORD", raising=False)
+    s = Settings(database_url="postgresql+psycopg://refunds_app:from%40url@db/refunds", db_secret_arn=SECRET_ARN,
+                 _env_file=None)
+    assert password_source(s).get() == "from@url"

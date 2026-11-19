@@ -4,7 +4,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -48,8 +48,12 @@ class RotatingPassword:
             now = self._clock()
             if self._last_refresh is not None and now - self._last_refresh < self._min_interval:
                 return None
+            try:
+                fresh = self._fetch()
+            except Exception:
+                log.exception("could not read the database password from Secrets Manager")
+                return None
             self._last_refresh = now
-            fresh = self._fetch()
             if fresh == rejected:
                 return None
             self._password = fresh
@@ -97,7 +101,8 @@ def connect_with_rotating_password(password: RotatingPassword):
 def password_source(settings: Settings) -> RotatingPassword | None:
     if not settings.db_secret_arn or settings.database_url.startswith("sqlite"):
         return None
-    return RotatingPassword(settings.db_password, secrets_manager_password(settings.db_secret_arn))
+    initial = make_url(settings.database_url).password or ""
+    return RotatingPassword(initial, secrets_manager_password(settings.db_secret_arn))
 
 
 def make_engine(url: str, password: RotatingPassword | None = None):
