@@ -80,14 +80,20 @@ resource "aws_iam_role_policy" "execution_secrets" {
   ] })
 }
 
-# Task role: the app only re-reads the RDS-managed DB secret after RDS rotates the password.
+# Task role: the provider needs no AWS API access.
 resource "aws_iam_role" "task" {
   name               = "${var.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
-resource "aws_iam_role_policy" "task_db_secret" {
-  role = aws_iam_role.task.id
+# API task role: only re-reads the RDS-managed DB secret after RDS rotates the password.
+resource "aws_iam_role" "api_task" {
+  name               = "${var.name}-api-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+resource "aws_iam_role_policy" "api_task_db_secret" {
+  role = aws_iam_role.api_task.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [aws_db_instance.main.master_user_secret[0].secret_arn] },
     { Effect = "Allow", Action = ["kms:Decrypt"], Resource = [aws_kms_key.app.arn] },
@@ -121,7 +127,7 @@ resource "aws_ecs_task_definition" "api" {
   cpu                      = var.api_task_cpu
   memory                   = var.api_task_memory
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  task_role_arn            = aws_iam_role.api_task.arn
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
