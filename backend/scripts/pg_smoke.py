@@ -9,7 +9,7 @@ from sqlalchemy import select, text  # noqa: E402
 
 from app import remediation  # noqa: E402
 from app.config import get_settings  # noqa: E402
-from app.db import SessionLocal, engine  # noqa: E402
+from app.db import RotatingPassword, SessionLocal, engine, make_engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import SupportRequest  # noqa: E402
 
@@ -53,6 +53,25 @@ with SessionLocal() as other_worker:
 with SessionLocal() as db:
     assert db.get(SupportRequest, a_id).status == "queued"
     assert db.get(SupportRequest, b_id).status == "open"
+
+# DB password rotation (RDS-managed secret): a pool built with the task-start password reconnects after it changes.
+with engine.begin() as conn:
+    conn.execute(text("drop role if exists smoke_rotation"))
+    conn.execute(text("create role smoke_rotation login password 'before'"))
+secret = {"password": "before"}
+rotating = make_engine(engine.url.set(username="smoke_rotation", password="before").render_as_string(hide_password=False),
+                       RotatingPassword("before", lambda: secret["password"]))
+with rotating.connect() as conn:
+    conn.execute(text("select 1"))
+with engine.begin() as conn:
+    conn.execute(text("alter role smoke_rotation password 'after'"))
+secret["password"] = "after"
+rotating.dispose()  # new physical connections must authenticate again
+with rotating.connect() as conn:
+    assert conn.execute(text("select current_user")).scalar_one() == "smoke_rotation"
+rotating.dispose()
+with engine.begin() as conn:
+    conn.execute(text("drop role smoke_rotation"))
 
 with engine.connect() as conn:
     n = conn.execute(text("select count(*) from refund_requests")).scalar_one()

@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     db_user: str = ""
     db_password: str = ""
     db_sslmode: str = "require"
+    # RDS-managed secret holding db_password; re-read when RDS rotates the password under a running task.
+    db_secret_arn: str = ""
 
     # Self-healing: hand errors / support requests to Devin, which opens a PR on this repo.
     devin_api_url: str = "https://api.devin.ai"

@@ -234,6 +234,7 @@ offboarded. The seed also adds an overdue GDPR erasure request for `cus_1007`.
 ```
 
 The app only needs a `DATABASE_URL` (or `DB_HOST`/`DB_USER`/`DB_PASSWORD`). It creates the schema, BI views and audit trigger, and seeds demo data on first start.
+On AWS, `DB_SECRET_ARN` points at the RDS-managed master secret: RDS rotates that password while tasks run, and ECS only injects `DB_PASSWORD` at task start, so when Postgres rejects the password the app re-reads it from Secrets Manager (at most every 30 s, [`db.py`](backend/app/db.py)) and retries the connection.
 
 ## Monitoring & tracing
 

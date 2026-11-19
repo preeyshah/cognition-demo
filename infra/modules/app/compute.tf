@@ -80,10 +80,18 @@ resource "aws_iam_role_policy" "execution_secrets" {
   ] })
 }
 
-# Task role: the app itself needs no AWS API access.
+# Task role: the app only re-reads the RDS-managed DB secret after RDS rotates the password.
 resource "aws_iam_role" "task" {
   name               = "${var.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+resource "aws_iam_role_policy" "task_db_secret" {
+  role = aws_iam_role.task.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [aws_db_instance.main.master_user_secret[0].secret_arn] },
+    { Effect = "Allow", Action = ["kms:Decrypt"], Resource = [aws_kms_key.app.arn] },
+  ] })
 }
 
 locals {
@@ -126,6 +134,7 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "DB_HOST", value = aws_db_instance.main.address },
       { name = "DB_NAME", value = "refunds" },
+      { name = "DB_SECRET_ARN", value = aws_db_instance.main.master_user_secret[0].secret_arn }, # re-read after rotation
       { name = "HISTORY_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
       { name = "PAYMENTS_PROVIDER_URL", value = "http://provider.${var.name}.internal:9000" },
       { name = "PAYMENTS_SANDBOX_CONTROLS", value = "true" }, # mock provider only; set false with a real PSP
